@@ -65,6 +65,12 @@ npm run format
 npm run format:check
 ```
 
+## SDK documentation
+
+- Zoho widget SDK docs: https://www.zohocrm.dev/explore/widgets/v1.5/jssdk#init
+
 ## Notes
 
 The production build runs the Vite build first and then executes the ZET packaging command so the extension can be packed directly from the same workflow.
+
+`npm run dev` may not work reliably as a full local preview because the Zoho embedded SDK functionality is only available when the widget runs inside the Zoho environment.
