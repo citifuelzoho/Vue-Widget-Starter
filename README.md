@@ -1,4 +1,4 @@
-# Touchpoint Widget
+# Zoho Widget
 
 A Vue 3 widget project bundled for a Zoho extension workflow.
 
