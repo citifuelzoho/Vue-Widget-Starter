@@ -6,7 +6,7 @@ module.exports = defineConfig({
   base: './',
   build: {
     outDir: 'app',
-    emptyOutDir: false
+    emptyOutDir: true
   },
   server: {
     host: '0.0.0.0',

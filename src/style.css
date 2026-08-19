@@ -1,21 +1,109 @@
 :root {
-  font-family: Arial, Helvetica, sans-serif;
-  color: #1f2937;
-  background: #f8fafc;
+  /* Light theme (default) design tokens */
+  --color-bg: #f8fafc;
+  --color-surface: #ffffff;
+  --color-surface-hover: #f8fafc;
+  --color-surface-selected: #eff6ff;
+  --color-surface-selected-hover: #e2effe;
+
+  --color-text: #1f2937;
+  --color-text-secondary: #334155;
+  --color-text-muted: #5f6c7b;
+
+  --color-border: #d6dbe1;
+  --color-border-subtle: #e5e9ef;
+
+  --color-accent: #1b75e8;
+  --color-accent-dark: #0f5dc8;
+  --color-accent-hover: #1668d1;
+  --color-accent-hover-dark: #0d4fae;
+  --color-accent-soft: #eff6ff;
+  --color-accent-soft-hover: #e2effe;
+  --color-focus-ring: rgba(76, 139, 245, 0.15);
+
+  --color-btn-secondary-bg: #f1f3f6;
+  --color-btn-secondary-bg-hover: #e2e6ea;
+  --color-btn-secondary-text: #2c3e50;
+
+  --shadow-shell: 0 8px 24px rgba(15, 23, 42, 0.08);
+
+  color-scheme: light dark;
+}
+
+/* Dark theme, applied automatically when the OS/browser prefers dark */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: #0f1420;
+    --color-surface: #171d2b;
+    --color-surface-hover: #1d2433;
+    --color-surface-selected: #1c2d47;
+    --color-surface-selected-hover: #223756;
+
+    --color-text: #e5e9f0;
+    --color-text-secondary: #c3cbda;
+    --color-text-muted: #93a1b5;
+
+    --color-border: #2c3444;
+    --color-border-subtle: #262d3c;
+
+    --color-accent: #4c8bf5;
+    --color-accent-dark: #2f6fd6;
+    --color-accent-hover: #5f97f7;
+    --color-accent-hover-dark: #3a7ade;
+    --color-accent-soft: #1c2d47;
+    --color-accent-soft-hover: #223756;
+    --color-focus-ring: rgba(76, 139, 245, 0.35);
+
+    --color-btn-secondary-bg: #232a3a;
+    --color-btn-secondary-bg-hover: #2b3346;
+    --color-btn-secondary-text: #dbe2ee;
+
+    --shadow-shell: 0 8px 24px rgba(0, 0, 0, 0.4);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  line-height: 1.5;
+  -webkit-text-size-adjust: 100%;
 }
 
 body {
-  margin: 0;
-  min-height: 100vh;
-  display: grid;
-  place-items: center;
+  margin: 20px;
+  font-family: Arial, Helvetica, sans-serif;
+  color: var(--color-text);
+  background: var(--color-bg);
+  transition:
+    background-color 0.2s ease,
+    color 0.2s ease;
+}
+
+img,
+svg,
+video,
+canvas,
+iframe,
+object,
+embed {
+  display: block;
+  max-width: 100%;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
 }
 
 .widget-shell {
   padding: 2rem;
   border-radius: 12px;
-  background: white;
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-shell);
 }
 
 h1 {

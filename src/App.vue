@@ -1,11 +1,24 @@
 <template>
   <main class="widget-shell">
-    <h1>Touchpoint Widget</h1>
-    <p>This Vue 3 starter is bundled into the app folder for the widget.</p>
-    <Clock />
+    <div v-auto-animate>
+      <HomeForm v-if="appState.page === 'home'" key="home" />
+      <IntroForm v-if="appState.page === 'intro'" key="intro" />
+      <PostServiceFeedbackForm
+        v-if="appState.page === 'post-service-feedback'"
+        key="post-service-feedback"
+      />
+      <ActiveClientFeedbackForm
+        v-if="appState.page === 'active-client-feedback'"
+        key="active-client-feedback"
+      />
+    </div>
   </main>
 </template>
 
 <script setup>
-  import Clock from './components/Clock.vue'
+  import HomeForm from './components/forms/HomeForm.vue'
+  import IntroForm from './components/forms/IntroForm.vue'
+  import PostServiceFeedbackForm from './components/forms/PostServiceFeedbackForm.vue'
+  import ActiveClientFeedbackForm from './components/forms/ActiveClientFeedbackForm.vue'
+  import { appState } from './store'
 </script>

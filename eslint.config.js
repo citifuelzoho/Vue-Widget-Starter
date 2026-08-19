@@ -11,9 +11,6 @@ export default [
     languageOptions: {
       ecmaVersion: 'latest',
       sourceType: 'module',
-      parserOptions: {
-        parser: 'vue-eslint-parser'
-      },
       globals: {
         ...globals.browser,
         ...globals.node
