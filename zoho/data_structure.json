@@ -1,0 +1,321 @@
+{
+  "$schema_description": "Machine-readable data model for a maintenance/service CRM: Accounts, Maintenance Requests, Maintenance Offers, Maintenance Touchpoints, and Service Engagements, including lookup relationships and rollup fields.",
+  "generated_date": "2026-08-20",
+  "modules": [
+    {
+      "module_name": "Accounts",
+      "api_name": "Accounts",
+      "description": "Top-level customer/account records.",
+      "fields": []
+    },
+    {
+      "module_name": "Maintenance Requests",
+      "api_name": "Maintenance_Requests",
+      "description": "Individual maintenance request/incident records, e.g. breakdown calls or scheduled services.",
+      "fields": [
+        {
+          "field_name": "Account",
+          "api_name": "Account",
+          "field_type": "lookup",
+          "relationship": "many_to_one",
+          "target_module": "Accounts"
+        },
+        {
+          "field_name": "Service_Engagement",
+          "api_name": "Service_Engagement",
+          "field_type": "lookup",
+          "relationship": "many_to_one",
+          "target_module": "Service Engagements"
+        },
+        {
+          "field_name": "Request_Type",
+          "api_name": "Request_Type",
+          "field_type": "picklist",
+          "assumed": true,
+          "note": "Inferred field used by Service Engagements.Times_Used_Breakdown rollup filter (Request_Type = 'Breakdown')."
+        },
+        {
+          "field_name": "Used_Date",
+          "api_name": "Used_Date",
+          "field_type": "date",
+          "note": "Source field for Service Engagements.First_Used_Date and Maintenance Offers.Last_Used_Date rollups."
+        },
+        {
+          "field_name": "Discounted_Amount",
+          "api_name": "Discounted_Amount",
+          "field_type": "currency",
+          "note": "Source field for Service Engagements.Total_Turnover rollup (sum)."
+        }
+      ]
+    },
+    {
+      "module_name": "Maintenance Offers",
+      "api_name": "Maintenance_Sales",
+      "description": "Sales offers/proposals for maintenance service, one per Account.",
+      "fields": [
+        {
+          "field_name": "Account",
+          "api_name": "Account",
+          "field_type": "lookup",
+          "relationship": "one_to_one",
+          "target_module": "Accounts"
+        },
+        {
+          "field_name": "Hard_Refusal_Count",
+          "api_name": "Hard_Refusal_Count",
+          "field_type": "rollup",
+          "aggregation": "count",
+          "source_module": "Maintenance Touchpoints",
+          "via_field": "Maintenance_Offer",
+          "filter": {
+            "field": "Touchpoint_Result",
+            "operator": "equals",
+            "value": "Hard Refused",
+            "assumed": true,
+            "note": "Filter field name inferred; represents the touchpoint outcome/result picklist."
+          }
+        },
+        {
+          "field_name": "Last_Touchpoint_Date",
+          "api_name": "Last_Touchpoint_Date",
+          "field_type": "rollup",
+          "aggregation": "max",
+          "source_module": "Maintenance Touchpoints",
+          "via_field": "Maintenance_Offer",
+          "source_field": "Created_Time",
+          "note": "Max of the touchpoint's created date/time."
+        },
+        {
+          "field_name": "Last_Used_Date",
+          "api_name": "Last_Used_Date",
+          "field_type": "rollup",
+          "aggregation": "max",
+          "source_module": "Maintenance Requests",
+          "source_field": "Used_Date",
+          "traversal_path": [
+            "Maintenance Offers",
+            "Service Engagements",
+            "Maintenance Requests"
+          ],
+          "note": "Maintenance Offers has no direct lookup to Maintenance Requests; this rollup traverses through Service Engagements (Maintenance Offers -> Service Engagements -> Maintenance Requests), i.e. it aggregates across all Maintenance Requests belonging to all Service Engagements linked to this Offer."
+        },
+        {
+          "field_name": "Service_Engagement_Count",
+          "api_name": "Service_Engagement_Count",
+          "field_type": "rollup",
+          "aggregation": "count",
+          "source_module": "Service Engagements",
+          "via_field": "Maintenance_Offer"
+        },
+        {
+          "field_name": "Used_Services",
+          "api_name": "Used_Services",
+          "field_type": "rollup",
+          "aggregation": "count",
+          "source_module": "Service Engagements",
+          "via_field": "Maintenance_Offer",
+          "assumed": true,
+          "note": "Definition given as 'count of Service Engagements', identical in description to Service_Engagement_Count. Likely intended to be filtered (e.g. Service Engagements where Times_Used > 0) to represent engagements actually used, but no filter was specified — confirm intended filter criteria."
+        }
+      ]
+    },
+    {
+      "module_name": "Maintenance Touchpoints",
+      "api_name": "Maintenance_Touchpoints",
+      "description": "Individual contact/touchpoint records (calls, visits, communications) tied to a Maintenance Offer.",
+      "fields": [
+        {
+          "field_name": "Maintenance_Offer",
+          "api_name": "Maintenance_Offer",
+          "field_type": "lookup",
+          "relationship": "many_to_one",
+          "target_module": "Maintenance Offers"
+        },
+        {
+          "field_name": "Touchpoint_Result",
+          "api_name": "Touchpoint_Result",
+          "field_type": "picklist",
+          "assumed": true,
+          "note": "Inferred field holding values such as 'Hard Refused'; used by Maintenance Offers.Hard_Refusal_Count rollup filter."
+        },
+        {
+          "field_name": "Created_Time",
+          "api_name": "Created_Time",
+          "field_type": "datetime",
+          "note": "Standard created-date field; source for Maintenance Offers.Last_Touchpoint_Date rollup."
+        }
+      ]
+    },
+    {
+      "module_name": "Service Engagements",
+      "api_name": "Service_Engagements",
+      "description": "Aggregation of Maintenance Requests under a given Maintenance Offer, representing an ongoing service relationship.",
+      "fields": [
+        {
+          "field_name": "Maintenance_Offer",
+          "api_name": "Maintenance_Offer",
+          "field_type": "lookup",
+          "relationship": "many_to_one",
+          "target_module": "Maintenance Offers"
+        },
+        {
+          "field_name": "First_Used_Date",
+          "api_name": "First_Used_Date",
+          "field_type": "rollup",
+          "aggregation": "min_first",
+          "source_module": "Maintenance Requests",
+          "via_field": "Service_Engagement",
+          "source_field": "Used_Date"
+        },
+        {
+          "field_name": "Times_Used",
+          "api_name": "Times_Used",
+          "field_type": "rollup",
+          "aggregation": "count",
+          "source_module": "Maintenance Requests",
+          "via_field": "Service_Engagement"
+        },
+        {
+          "field_name": "Times_Used_Breakdown",
+          "api_name": "Times_Used_Breakdown",
+          "field_type": "rollup",
+          "aggregation": "count",
+          "source_module": "Maintenance Requests",
+          "via_field": "Service_Engagement",
+          "filter": {
+            "field": "Request_Type",
+            "operator": "equals",
+            "value": "Breakdown"
+          }
+        },
+        {
+          "field_name": "Total_Turnover",
+          "api_name": "Total_Turnover",
+          "field_type": "rollup",
+          "aggregation": "sum",
+          "source_module": "Maintenance Requests",
+          "via_field": "Service_Engagement",
+          "source_field": "Discounted_Amount"
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "id": 1,
+      "from_module": "Maintenance Requests",
+      "to_module": "Accounts",
+      "field_name": "Account",
+      "cardinality": "many_to_one"
+    },
+    {
+      "id": 2,
+      "from_module": "Maintenance Requests",
+      "to_module": "Service Engagements",
+      "field_name": "Service_Engagement",
+      "cardinality": "many_to_one"
+    },
+    {
+      "id": 3,
+      "from_module": "Maintenance Offers",
+      "to_module": "Accounts",
+      "field_name": "Account",
+      "cardinality": "one_to_one"
+    },
+    {
+      "id": 4,
+      "from_module": "Service Engagements",
+      "to_module": "Maintenance Offers",
+      "field_name": "Maintenance_Offer",
+      "cardinality": "many_to_one"
+    },
+    {
+      "id": 5,
+      "from_module": "Maintenance Touchpoints",
+      "to_module": "Maintenance Offers",
+      "field_name": "Maintenance_Offer",
+      "cardinality": "many_to_one"
+    }
+  ],
+  "rollups": [
+    {
+      "target_module": "Service Engagements",
+      "field_name": "First_Used_Date",
+      "aggregation": "first (min by Used_Date)",
+      "source_module": "Maintenance Requests",
+      "source_field": "Used_Date",
+      "filter": null
+    },
+    {
+      "target_module": "Service Engagements",
+      "field_name": "Times_Used",
+      "aggregation": "count",
+      "source_module": "Maintenance Requests",
+      "source_field": null,
+      "filter": null
+    },
+    {
+      "target_module": "Service Engagements",
+      "field_name": "Times_Used_Breakdown",
+      "aggregation": "count",
+      "source_module": "Maintenance Requests",
+      "source_field": null,
+      "filter": "Request_Type = 'Breakdown'"
+    },
+    {
+      "target_module": "Service Engagements",
+      "field_name": "Total_Turnover",
+      "aggregation": "sum",
+      "source_module": "Maintenance Requests",
+      "source_field": "Discounted_Amount",
+      "filter": null
+    },
+    {
+      "target_module": "Maintenance Offers",
+      "field_name": "Hard_Refusal_Count",
+      "aggregation": "count",
+      "source_module": "Maintenance Touchpoints",
+      "source_field": null,
+      "filter": "Touchpoint_Result = 'Hard Refused' (field name assumed)"
+    },
+    {
+      "target_module": "Maintenance Offers",
+      "field_name": "Last_Touchpoint_Date",
+      "aggregation": "max",
+      "source_module": "Maintenance Touchpoints",
+      "source_field": "Created_Time",
+      "filter": null
+    },
+    {
+      "target_module": "Maintenance Offers",
+      "field_name": "Last_Used_Date",
+      "aggregation": "max",
+      "source_module": "Maintenance Requests",
+      "source_field": "Used_Date",
+      "filter": null,
+      "note": "Traverses via Service Engagements (Maintenance Offers -> Service Engagements -> Maintenance Requests), not a direct lookup."
+    },
+    {
+      "target_module": "Maintenance Offers",
+      "field_name": "Service_Engagement_Count",
+      "aggregation": "count",
+      "source_module": "Service Engagements",
+      "source_field": null,
+      "filter": null
+    },
+    {
+      "target_module": "Maintenance Offers",
+      "field_name": "Used_Services",
+      "aggregation": "count",
+      "source_module": "Service Engagements",
+      "source_field": null,
+      "filter": null,
+      "note": "Description duplicates Service_Engagement_Count; intended filter criteria unspecified — assumption flagged."
+    }
+  ],
+  "assumptions_and_open_questions": [
+    "Exact API/field names for picklists (Request_Type on Maintenance Requests, Touchpoint_Result on Maintenance Touchpoints) were inferred from rollup descriptions, not stated explicitly.",
+    "Maintenance Offers.Last_Used_Date rolls up Maintenance Requests indirectly through Service Engagements, since Maintenance Offers has no direct lookup to Maintenance Requests.",
+    "Maintenance Offers.Used_Services and Service_Engagement_Count share the same stated definition ('count of Service Engagements'); a distinguishing filter (e.g. engagements with Times_Used > 0) is likely intended but was not specified in the source description."
+  ]
+}

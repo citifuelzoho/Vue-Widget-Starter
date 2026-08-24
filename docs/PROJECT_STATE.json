@@ -1,0 +1,1294 @@
+{
+  "$schema_note": "Machine-readable project state for LLM hand-off. Not meant for human reading — see docs/DEVELOPER_GUIDE.md (architecture/flow prose), docs/AGENT_GUIDE.md (agent-facing, non-technical), docs/TOUCHPOINT_LAYOUT.md (Zoho page-layout field reference) for that. This file must be updated in the same change as any code edit that touches routing, appState shape, a form's fields/payload, ReasonBranchFields' branch keys, select-options.js exports, or the handoff mechanism — same standing rule as the other two docs (see memory: keep-developer-guide-in-sync, keep-agent-guide-in-sync).",
+  "last_verified_against_source": "2026-08-20",
+  "project": {
+    "name": "Touchpoint Widget",
+    "purpose": "Zoho CRM widget (Vue 3 + Vite, packaged with zet) opened from a Maintenance Offer record. Sales agent logs a call by picking a conversation type + outcome, then fills a type-specific form. Submitting creates a Maintenance_Touchpoints record (one form also updates Maintenance_Request records). No dashboard/report scope beyond that.",
+    "repo_root": "/Users/delwick/Desktop/touchpoint_widget"
+  },
+  "stack": {
+    "framework": "Vue 3, <script setup> SFCs only, no router, no state library (plain ref()s)",
+    "build": "vite build && zet pack (npm run build) -> app/ then dist/touchpoint_widget.zip (the Zoho upload artifact)",
+    "vite_config": { "outDir": "app", "emptyOutDir": true },
+    "local_dev_limitation": "npm run dev renders UI but ZOHO.CRM.* calls throw/no-op outside the real Zoho iframe — no local mock exists. All functional testing is manual, inside Zoho, after a real build+upload.",
+    "lint_format": "ESLint + Prettier configured; project convention is editor-formats-on-save, so format/format:check is NOT run after every edit (see memory: skip-prettier-check-after-edits). npm run lint is still used to catch no-undef/no-unused-vars. Baseline expected lint noise: 'ZOHO' is not defined (no-undef) on every file calling ZOHO.CRM.* — not a regression."
+  },
+  "file_manifest": {
+    "src/main.js": "ZOHO.embeddedApp bootstrap. Reads EntityId from PageLoad event into appState.entityId, calls ZOHO.CRM.UI.Resize({width:1200,height:750}), mounts App with @formkit/auto-animate plugin.",
+    "src/App.vue": "Router substitute: one v-if per appState.page value, wraps forms in <div v-auto-animate>. Six branches: home, intro, post-service-feedback, active-client-feedback, re-engagement, churned-feedback.",
+    "src/store.js": "appState ref — the ONLY cross-form shared state: conversationType, callOutcome, entityId, page. Everything else is a local ref in the owning form. Do not add form-specific fields here.",
+    "src/store/handoff.js": "One-shot module-level ref bridge: setHandoffData(data)/consumeHandoffData() (read-and-clear). Used solely for ReEngagementForm -> ChurnedFeedbackForm.",
+    "src/store/user.js": "useUserStore() composable: user ref + fetchUser() -> ZOHO.CRM.CONFIG.getCurrentUser(), sets user.value = responseData.users[0]. Called by every form except ActiveClientFeedbackForm.",
+    "src/store/maintenanceOffer.js": "useMaintenanceOfferStore() composable (added 2026-08-21): maintenanceOffer ref + fetchMaintenanceOffer() -> ZOHO.CRM.API.getRecord({Entity:'Maintenance_Sales', RecordID: appState.entityId}), sets maintenanceOffer.value = response.data[0]. Called only by HomeForm, to read Lifecycle_Status for availableConversationTypes filtering. Entity name is hardcoded, not read from the PageLoad event, since this widget is always opened from a Maintenance_Sales record.",
+    "src/config/select-options.js": "All dropdown/multiselect option arrays, grouped into commented sections by consumer (Home / Shared-across-forms / Intro / Post-Service Feedback / Active Client Feedback / Shared reason-branch fields / Re-engagement / Churned). Source of truth for exact option values — this JSON does not duplicate them except where a value is a mapping key elsewhere in this file.",
+    "src/utils/touchpoint.js": "createTouchpoint(apiData) -> ZOHO.CRM.API.insertRecord({Entity:'Maintenance_Touchpoints', APIData: JSON.parse(JSON.stringify(apiData)), Trigger:['workflow']}). Used by every form. The JSON round-trip was added 2026-08-21 — see known_bugs_fixed_this_project.reactive-proxy-clone-failure.",
+    "src/utils/maintenanceRequests.js": "updateMaintenanceRequests(recordIds, fields) -> recordIds.map(id => ZOHO.CRM.API.updateRecord({Entity:'Maintenance_Request' (singular, intentional — real Zoho API name), APIData:{id,...JSON.parse(JSON.stringify(fields))}, Trigger:['workflow']})) — returns an ARRAY of promises, one per record (not a single bulk call). Used only by PostServiceFeedbackForm. Same JSON round-trip added 2026-08-21 as defensive insurance, though no current field passed here is reactive.",
+    "src/components/Base*.vue": "BaseSelect, BaseMultiSelect, BaseInput, BaseTextarea, BaseButton — generic form controls.",
+    "src/components/TablePagination.vue": "Used only by PostServiceFeedbackForm's request table.",
+    "src/components/Clock.vue": "Unused scaffold leftover. Not imported anywhere. Safe to delete.",
+    "src/components/forms/HomeForm.vue": "Entry screen. Filters the Conversation option dropdown by the current Maintenance_Sales.Lifecycle_Status — see forms.HomeForm below.",
+    "src/components/forms/IntroForm.vue": "Flat form, no shared component.",
+    "src/components/forms/PostServiceFeedbackForm.vue": "Writes to two modules; has known bugs (see known_bugs).",
+    "src/components/forms/ActiveClientFeedbackForm.vue": "Mounts ReasonBranchFields for its concern tree.",
+    "src/components/forms/ReEngagementForm.vue": "Mounts ReasonBranchFields; can hand off to Churned instead of submitting.",
+    "src/components/forms/ChurnedFeedbackForm.vue": "Mounts ReasonBranchFields; can be entered directly or via Re-engagement handoff.",
+    "src/components/forms/ReasonBranchFields.vue": "Shared conditional-field tree mounted by the three forms above. See shared_component.reason_branch_fields below."
+  },
+  "app_state_shape": {
+    "conversationType": "string — one of ConversationTypes values",
+    "callOutcome": "string — one of CallOutcomeOptions values",
+    "entityId": "string — Maintenance Offer record id from PageLoad EntityId",
+    "page": "string — one of: home | intro | post-service-feedback | active-client-feedback | re-engagement | churned-feedback"
+  },
+  "routing": {
+    "mechanism": "No router. App.vue does v-if on appState.page. Two writers of appState.page in the whole codebase.",
+    "writers": [
+      {
+        "location": "HomeForm.vue#submitHomeForm",
+        "condition": "callOutcome === 'Connected'",
+        "mapping": {
+          "Intro": "intro",
+          "Post-service feedback": "post-service-feedback",
+          "Active Client Feedback": "active-client-feedback",
+          "Re-engagement": "re-engagement",
+          "Churned Feedback": "churned-feedback"
+        }
+      },
+      {
+        "location": "ReEngagementForm.vue#createReEngagementTouchpoint",
+        "condition": "isClosingReEngagement === 'Yes' AND reEngagementOutcome in {Lost To Competitor, Hard Refusal, Out Of Business}",
+        "mapping": { "*": "churned-feedback" },
+        "side_effects": [
+          "also sets appState.conversationType = 'Churned Feedback'",
+          "calls setHandoffData(...) before navigating",
+          "does NOT call createTouchpoint — skips Re-engagement's own touchpoint entirely"
+        ]
+      }
+    ],
+    "invariant": "If a 7th form/page is ever added, three places must use the exact same string literal: App.vue (v-if + import), HomeForm.vue's if/else-if chain, select-options.js's ConversationTypes. No shared constant exists for page names or conversation-type values — verified manually, not enforced structurally."
+  },
+  "forms": {
+    "HomeForm": {
+      "file": "src/components/forms/HomeForm.vue",
+      "entity_written": "Maintenance_Touchpoints",
+      "uses_user_store": true,
+      "uses_maintenance_offer_store": "added 2026-08-21 — fetchMaintenanceOffer() called fire-and-forget at setup, same pattern as fetchUser(). No .catch on it (minor robustness gap, see known_bugs).",
+      "fields": [
+        {
+          "id": "conversation-type",
+          "type": "select",
+          "model": "appState.conversationType",
+          "options": "availableConversationTypes (computed — see below). Falls back to the full ConversationTypes list while maintenanceOffer hasn't loaded or its Lifecycle_Status isn't in the map.",
+          "required": true,
+          "apiField": "Conversation_Type"
+        },
+        {
+          "id": "call-outcome",
+          "type": "select",
+          "model": "appState.callOutcome",
+          "options": "CallOutcomeOptions",
+          "required": true,
+          "apiField": "Call_Outcome"
+        },
+        {
+          "id": "next-action-date",
+          "type": "date",
+          "model": "nextActionDate",
+          "required": true,
+          "conditional": "isNotConnected",
+          "apiField": "Next_Action_Date"
+        }
+      ],
+      "computed": {
+        "isNotConnected": "!!appState.callOutcome && appState.callOutcome !== 'Connected'",
+        "availableConversationTypes": "ConversationTypes.filter(opt => (AllowedConversationTypesByLifecycleStatus[maintenanceOffer?.Lifecycle_Status] || ConversationTypes.map(o=>o.value)).includes(opt.value)) — added 2026-08-21. AllowedConversationTypesByLifecycleStatus is a DRAFT map in select-options.js, not yet product-confirmed except for two settled points: Intro is offered from Activated/Active (client may not know all services yet), and Re-engagement is offered from both Dormant AND Churned (spec allows a human to manually restart from Churned)."
+      },
+      "submit_logic": "If isNotConnected: createTouchpoint({Maintenance_Offers, Conversation_Type, Call_Outcome, Next_Action_Date, Owner}) -> alert -> closeReload (terminal, no further form for ANY conversationType). Else: route appState.page per conversationType (see routing.writers[0]) — no CRM write happens here, the picked form writes its own touchpoint later.",
+      "button_label_logic": "isLoading ? 'Submitting...' : (isNotConnected ? 'Submit' : 'Next')"
+    },
+    "IntroForm": {
+      "file": "src/components/forms/IntroForm.vue",
+      "entity_written": "Maintenance_Touchpoints",
+      "uses_user_store": true,
+      "fields": [
+        {
+          "id": "client-reaction",
+          "type": "select",
+          "model": "clientReaction",
+          "options": "ClientReactionOptions",
+          "required": true,
+          "apiField": "Client_Reaction"
+        },
+        {
+          "id": "refusal-reason",
+          "type": "select",
+          "model": "refusalReason",
+          "options": "RefusalReasonOptions",
+          "required": true,
+          "conditional": "clientReaction === 'Refused'",
+          "apiField": "Refusal_Reason",
+          "blank_when_hidden": true
+        },
+        {
+          "id": "refusal-confidence",
+          "type": "select",
+          "model": "refusalConfidence",
+          "options": "RefusalConfidenceOptions",
+          "required": true,
+          "conditional": "clientReaction === 'Refused'",
+          "apiField": "Refusal_Confidence",
+          "blank_when_hidden": true
+        },
+        {
+          "id": "services-discussed",
+          "type": "multiselect",
+          "model": "servicesDiscussed",
+          "options": "ServicesDiscussedOptions",
+          "required": true,
+          "apiField": "Services_Discussed"
+        },
+        {
+          "id": "summary-notes",
+          "type": "textarea",
+          "model": "summaryNotes",
+          "required": true,
+          "apiField": "Summary_Notes"
+        },
+        {
+          "id": "next-action-date",
+          "type": "date",
+          "model": "nextActionDate",
+          "required": true,
+          "apiField": "Next_Action_Date"
+        }
+      ],
+      "submit_logic": "Single createTouchpoint call with all fields above + Maintenance_Offers/Conversation_Type/Call_Outcome/Owner -> alert -> closeReload. No shared component, no branch tree. Payload guards mirror the v-if condition directly inline (no separate computed) — no drift possible."
+    },
+    "PostServiceFeedbackForm": {
+      "file": "src/components/forms/PostServiceFeedbackForm.vue",
+      "entities_written": ["Maintenance_Touchpoints", "Maintenance_Request"],
+      "uses_user_store": true,
+      "fields": [
+        {
+          "id": "service-satisfaction",
+          "type": "select",
+          "model": "serviceSatisfaction",
+          "options": "ServiceSatisfactionOptions",
+          "required": true
+        },
+        {
+          "id": "will-use-again",
+          "type": "select",
+          "model": "willUseAgain",
+          "options": "WillUseAgainOptions",
+          "required": true
+        },
+        {
+          "id": "request-table",
+          "type": "checkbox-table",
+          "model": "selectedRequests (array of Maintenance_Request ids)",
+          "required": true,
+          "note": "submit disabled unless selectedRequests.length > 0"
+        },
+        {
+          "id": "shop-rating (per row, inside request-table)",
+          "type": "select, one per table row",
+          "model": "shopRatings — ref({}) keyed by request id, NOT an array, NOT a single shared value",
+          "options": "ratingOptions (string '1'-'5', NOT numbers — fixed 2026-08-21: Shop_Rating is a Zoho picklist field, so the API sends/returns these as strings; numeric option.value made pre-fill-from-existing-rating fail to match)",
+          "required": "conditionally — :required=\"selectedRequests.includes(request.id)\", so only checked rows block submit if left unrated",
+          "note": "Changed 2026-08-21 from one shared truckShopRating field to per-row — a single call can cover requests serviced by different shops. Bare native <select>, not BaseSelect (BaseSelect's fixed-width label doesn't fit a table cell). Re-initialized inside fetchRequests() every time reqData changes (same reset point as selectedRequests being cleared on page/limit change), but pre-filled from request.Shop_Rating (String(...)-coerced) when the fetched request already has a rating, not blanked unconditionally — fixed same day, see known_bugs_fixed_this_project."
+        },
+        {
+          "id": "agent-rating (per row, inside request-table)",
+          "type": "select, one per table row",
+          "model": "agentRatings — ref({}) keyed by request id, same shape/treatment as shopRatings",
+          "options": "ratingOptions (string '1'-'5', see shop-rating note)",
+          "required": "conditionally — :required=\"selectedRequests.includes(request.id)\"",
+          "note": "Changed 2026-08-21, same reasoning as shop-rating above — pre-filled from request.Maintenance_Agent_Rating."
+        },
+        {
+          "id": "next-action-date",
+          "type": "date",
+          "model": "nextActionDate",
+          "required": true
+        }
+      ],
+      "data_source": {
+        "fn": "fetchRequests()",
+        "call": "ZOHO.CRM.FUNCTIONS.execute('msGetMaintenanceRequests', {moId: appState.entityId, offset: reqPage*reqLimit, limit: reqLimit})",
+        "response_shape": "response.details.output is a JSON string; parsed to {data, info:{more_records}}",
+        "table_columns": [
+          "Name",
+          "Used_Date",
+          "Shop_Name.name",
+          "Service_Type",
+          "Service_Types (subtypes list)",
+          "Truck_Unit_Number / Trailer_Unit_Number joined as Unit Number",
+          "Shop Rating (input column, added 2026-08-21)",
+          "Agent Rating (input column, added 2026-08-21)"
+        ],
+        "pagination": "reqPage/reqLimit via TablePagination.vue + RequestLimitOptions (10/25/50). handleLimitChange/goToPrevPage/goToNextPage all clear selectedRequests before refetching; shopRatings/agentRatings get reset inside fetchRequests() itself once the new reqData arrives, not pre-cleared in those three functions."
+      },
+      "submit_logic_ordered_steps": [
+        "1. touchpointApiData = {Maintenance_Offers, Conversation_Type, Call_Outcome, Next_Action_Date, Owner} — NOT the rating fields, which never touch the touchpoint record at all.",
+        "2. createResp = await createTouchpoint(touchpointApiData)",
+        "3. DEAD CODE: await ZOHO.CRM.API.getRecord({Entity:'Maintenance_Touchpoints', approved:'both', RecordID: createResp.data[0].details.id}) then console.log(tp) — result unused, see known_bugs",
+        "4. updatePromises = selectedRequests.flatMap(id => updateMaintenanceRequests([id], {Service_Satisfaction, Will_Use_Again, Shop_Rating: shopRatings[id], Maintenance_Agent_Rating: agentRatings[id], Touchpoint: {id: createResp.data[0].details.id}})) — changed 2026-08-21 from one shared updateFields object for all rows to a per-row object, since Shop_Rating/Maintenance_Agent_Rating now differ per request while Service_Satisfaction/Will_Use_Again/Touchpoint stay shared. Still N separate updateRecord calls, N = selectedRequests.length — updateMaintenanceRequests itself wasn't changed, just called once per id instead of once for the whole array.",
+        "5. await Promise.all(updatePromises)",
+        "6. alert -> setTimeout(1500ms) -> isLoading=false, closeReload"
+      ],
+      "note": "isLoading is set false only inside the final setTimeout, not in a .finally() — see known_bugs. A different implementation of this form once existed in an old Claude Code plan file (~/.claude/plans/post-service-feedback-form-prancy-hinton.md) — that plan describes a single bulk updateRecord call, Number() casts on ratings, encodeURIComponent on strings, and a Maintenance_Requests lookup field on the touchpoint itself. NONE of that matches current source — the plan is STALE/SUPERSEDED, do not treat it as current design intent."
+    },
+    "ActiveClientFeedbackForm": {
+      "file": "src/components/forms/ActiveClientFeedbackForm.vue",
+      "entity_written": "Maintenance_Touchpoints",
+      "uses_user_store": true,
+      "owner_field_sent": true,
+      "fields": [
+        {
+          "id": "overall-experience",
+          "type": "select",
+          "model": "overallExperience",
+          "options": "OverallExperienceOptions",
+          "required": true,
+          "apiField": "Overall_Experience"
+        },
+        {
+          "id": "client-likes",
+          "type": "multiselect",
+          "model": "clientLikes",
+          "options": "ClientLikesOptions",
+          "required": true,
+          "apiField": "Client_Likes"
+        },
+        {
+          "id": "main-reason",
+          "type": "select",
+          "model": "mainReason",
+          "options": "MainReasonOptions",
+          "required": true,
+          "apiField": "Main_Reason"
+        },
+        {
+          "id": "what-can-improve",
+          "type": "multiselect",
+          "model": "whatCanImprove",
+          "options": "WhatCanImproveOptions",
+          "required": true,
+          "apiField": "What_Can_We_Improve"
+        },
+        {
+          "id": "has-concerns",
+          "type": "select",
+          "model": "hasConcerns",
+          "options": "YesNoOptions",
+          "required": true,
+          "apiField": "Has_Concerns"
+        },
+        {
+          "id": "primary-concern",
+          "type": "select",
+          "model": "primaryConcern",
+          "options": "PrimaryConcernOptions",
+          "required": true,
+          "conditional": "hasConcerns === 'Yes'",
+          "apiField": "Primary_Concern",
+          "blank_when_hidden": true
+        },
+        {
+          "id": "reason-branch-fields",
+          "component": "ReasonBranchFields",
+          "branch_prop": "concernBranch",
+          "communication_options_prop": "CommunicationIssueOptions",
+          "communication_field_key_prop": "Communication_Issue"
+        },
+        {
+          "id": "next-action-date",
+          "type": "date",
+          "model": "nextActionDate",
+          "required": true,
+          "apiField": "Next_Action_Date"
+        }
+      ],
+      "branch_map_name": "PRIMARY_CONCERN_TO_BRANCH",
+      "branch_map": {
+        "Price": "price",
+        "Competitor": "competitorChoice",
+        "Location / Coverage": "location",
+        "Service Availability": "serviceAvailability",
+        "Bad Service Experience": "badService",
+        "Billing / Payment": "billing",
+        "Communication": "communication",
+        "Driver Related": "driver"
+      },
+      "unmapped_primary_concern_values": ["Other"],
+      "computed": {
+        "concernBranch": "hasConcerns === 'Yes' ? (PRIMARY_CONCERN_TO_BRANCH[primaryConcern] || '') : ''  — FIXED BUG: must gate on hasConcerns, not just primaryConcern (see known_bugs_fixed)"
+      },
+      "submit_logic": "apiData = {Maintenance_Offers, Conversation_Type, Call_Outcome, Next_Action_Date, Overall_Experience, Client_Likes, Main_Reason, What_Can_We_Improve, Has_Concerns, Primary_Concern (resolved via hasConcerns gate), Owner, ...branchFields} -> createTouchpoint -> alert -> closeReload. Owner added 2026-08-20 (this form used to be the one exception that didn't send it, see known_bugs_fixed_this_project.active-client-no-owner)."
+    },
+    "ReEngagementForm": {
+      "file": "src/components/forms/ReEngagementForm.vue",
+      "entity_written": "Maintenance_Touchpoints (conditionally — see chaining)",
+      "uses_user_store": true,
+      "fields": [
+        {
+          "id": "reason-stopped",
+          "type": "select",
+          "model": "reasonStopped",
+          "options": "ReasonStoppedOptions",
+          "required": true,
+          "apiField": "Reason_Stopped"
+        },
+        {
+          "id": "reason-branch-fields",
+          "component": "ReasonBranchFields",
+          "branch_prop": "reasonBranch",
+          "models": ["competitorName", "whyCompetitorWon"],
+          "communication_options_prop": "default (ReEngagementCommunicationOptions)",
+          "communication_field_key_prop": "default (Communication_Trust_Issue)"
+        },
+        {
+          "id": "what-can-bring-back",
+          "type": "multiselect",
+          "model": "whatCanBringBack",
+          "options": "WhatCanBringBackOptions",
+          "required": true,
+          "apiField": "What_Can_Bring_Client_Back"
+        },
+        {
+          "id": "target-service",
+          "type": "multiselect",
+          "model": "targetService",
+          "options": "TargetServiceOptions",
+          "required": true,
+          "apiField": "Target_Service"
+        },
+        {
+          "id": "return-potential",
+          "type": "select",
+          "model": "returnPotential",
+          "options": "ReturnPotentialOptions",
+          "required": true,
+          "apiField": "Return_Potential"
+        },
+        {
+          "id": "re-engagement-status",
+          "type": "select",
+          "model": "reEngagementStatus",
+          "options": "ReEngagementStatusOptions",
+          "required": true,
+          "apiField": "Re_Engagement_Status"
+        },
+        {
+          "id": "is-closing",
+          "type": "select",
+          "model": "isClosingReEngagement",
+          "options": "YesNoOptions",
+          "required": true,
+          "note": "gate for the entire outcome block below"
+        },
+        {
+          "id": "re-engagement-outcome",
+          "type": "select",
+          "model": "reEngagementOutcome",
+          "options": "ReEngagementOutcomeOptions",
+          "required": true,
+          "conditional": "isClosingReEngagement === 'Yes'",
+          "apiField": "Re_Engagement_Outcome (via resolvedOutcome guard)"
+        },
+        {
+          "id": "what-brought-back",
+          "type": "multiselect",
+          "model": "whatBroughtClientBack",
+          "options": "WhatBroughtClientBackOptions",
+          "required": true,
+          "conditional": "resolvedOutcome === 'Reactivated'",
+          "apiField": "What_Brought_Client_Back"
+        },
+        {
+          "id": "why-not-now",
+          "type": "select",
+          "model": "whyNotNow",
+          "options": "WhyNotNowOptions",
+          "required": true,
+          "conditional": "resolvedOutcome === 'Not Now'",
+          "apiField": "Why_Not_Now"
+        },
+        {
+          "id": "competitor-name-lost",
+          "type": "input",
+          "model": "competitorName (SAME ref as ReasonBranchFields' v-model)",
+          "required": true,
+          "conditional": "resolvedOutcome === 'Lost To Competitor'"
+        },
+        {
+          "id": "why-competitor-won",
+          "type": "select",
+          "model": "whyCompetitorWon (SAME ref as ReasonBranchFields' v-model)",
+          "options": "CompetitorReasonOptions",
+          "required": true,
+          "conditional": "resolvedOutcome === 'Lost To Competitor'"
+        },
+        {
+          "id": "next-action-date",
+          "type": "date",
+          "model": "nextActionDate",
+          "required": true,
+          "conditional": "!opensChurnedForm",
+          "apiField": "Next_Action_Date",
+          "note": "A Next_Review_Date field (shown/required specifically for 'Not Now', replacing this field for that one outcome) was added and removed again on 2026-08-21 — product decided Next_Action_Date should stay consistent across every outcome and every form. blank_when_hidden still applies for the churn-bound outcomes via opensChurnedForm."
+        }
+      ],
+      "branch_map_name": "REASON_STOPPED_TO_BRANCH",
+      "branch_map": {
+        "Price": "price",
+        "Competitor": "competitorChoice",
+        "No Current Need": "noNeed",
+        "Internal Maintenance": "internalMaintenance",
+        "Bad Service Experience": "badService",
+        "Location / Coverage": "location",
+        "Service Availability": "serviceAvailability",
+        "Billing / Payment": "billing",
+        "Driver Related": "driver",
+        "Communication / Trust": "communication",
+        "Company / Management": "company"
+      },
+      "unmapped_reason_stopped_values": [
+        "Business Slowdown",
+        "Fleet Reduced",
+        "Unknown",
+        "Other"
+      ],
+      "computed": {
+        "reasonBranch": "REASON_STOPPED_TO_BRANCH[reasonStopped] || ''",
+        "resolvedOutcome": "isClosingReEngagement === 'Yes' ? reEngagementOutcome : ''  — the correct guard pattern (contrast ActiveClientFeedback's fixed bug). A local const inside the submit function, not a top-level computed — briefly hoisted to a computed on 2026-08-21 so the template could also gate next-action-date's visibility on it, then reverted the same day along with that whole Next_Review_Date experiment (see next-action-date field note above).",
+        "opensChurnedForm": "!!CHURN_REASON_BY_OUTCOME[reEngagementOutcome.value]  — NOTE: reads raw reEngagementOutcome, not resolvedOutcome, but is only ever meaningful while isClosingReEngagement==='Yes' since that's the only time the outcome section (and this computed's effect) is visible"
+      },
+      "churn_reason_by_outcome_map": {
+        "Lost To Competitor": "Lost To Competitor",
+        "Hard Refusal": "Hard Refusal",
+        "Out Of Business": "Business Closed"
+      },
+      "submit_logic": "resolvedOutcome computed. branchFields = ReasonBranchFields.getApiFields(). reEngagementFields assembled (see field list). Competitor_Name = branchFields.Competitor_Name || (resolvedOutcome==='Lost To Competitor' ? competitorName : '') — reason-branch value wins if present. Why_Competitor_Won = resolvedOutcome==='Lost To Competitor' ? whyCompetitorWon : (branchFields.Why_Competitor_Won || '') — outcome value wins if present. Contactability = resolvedOutcome==='Unable To Reach' ? 'Unreachable' : ''. churnReason = CHURN_REASON_BY_OUTCOME[resolvedOutcome]. IF churnReason truthy: setHandoffData({churnReason, competitorName: reEngagementFields.Competitor_Name, whyCompetitorWon: reEngagementFields.Why_Competitor_Won, reEngagementFields}); appState.conversationType='Churned Feedback'; appState.page='churned-feedback'; isLoading=false; RETURN — no createTouchpoint call at all. ELSE: createTouchpoint(reEngagementFields) -> alert -> closeReload."
+    },
+    "ChurnedFeedbackForm": {
+      "file": "src/components/forms/ChurnedFeedbackForm.vue",
+      "entity_written": "Maintenance_Touchpoints",
+      "uses_user_store": true,
+      "reachable_via": [
+        "direct pick from HomeForm dropdown",
+        "handoff from ReEngagementForm"
+      ],
+      "fields": [
+        {
+          "id": "handoff-note",
+          "type": "display-only",
+          "conditional": "cameFromReEngagement"
+        },
+        {
+          "id": "churn-reason",
+          "type": "select",
+          "model": "churnReason",
+          "options": "ChurnReasonOptions",
+          "required": true,
+          "apiField": "Churn_Reason",
+          "seeded_from_handoff": "incomingHandoff.churnReason"
+        },
+        {
+          "id": "reason-branch-fields",
+          "component": "ReasonBranchFields",
+          "branch_prop": "churnBranch",
+          "models": [
+            "competitorName (seeded from incomingHandoff.competitorName)",
+            "whyCompetitorWon (seeded from incomingHandoff.whyCompetitorWon)"
+          ],
+          "communication_options_prop": "default (ReEngagementCommunicationOptions)",
+          "communication_field_key_prop": "default (Communication_Trust_Issue)"
+        },
+        {
+          "id": "lost-services",
+          "type": "multiselect",
+          "model": "lostServices",
+          "options": "LostServicesOptions",
+          "required": true,
+          "apiField": "Lost_Services"
+        },
+        {
+          "id": "return-possibility",
+          "type": "select",
+          "model": "returnPossibility",
+          "options": "ReturnPossibilityOptions",
+          "required": true,
+          "apiField": "Return_Possibility",
+          "seeded_from_handoff": "RETURN_POTENTIAL_TO_POSSIBILITY[incomingHandoff.reEngagementFields.Return_Potential] — added 2026-08-21 to reconcile Re-engagement's Return_Potential and Churned's Return_Possibility asking the same question with two different value sets; see decision_log."
+        },
+        {
+          "id": "previous-what-can-bring-back-note",
+          "type": "display-only",
+          "conditional": "showWhatCouldBringBack && previousWhatCanBringBack.length",
+          "note": "Added 2026-08-21. Shows incomingHandoff.reEngagementFields.What_Can_Bring_Client_Back as context next to what-could-bring-back — NOT pre-filled into it (option lists don't map cleanly), just surfaced so the agent sees the prior answer instead of silently duplicating or contradicting it. See decision_log."
+        },
+        {
+          "id": "what-could-bring-back",
+          "type": "multiselect",
+          "model": "whatCouldBringBack",
+          "options": "WhatCouldBringChurnedBackOptions",
+          "required": true,
+          "conditional": "showWhatCouldBringBack",
+          "apiField": "What_Could_Bring_Client_Back",
+          "blank_when_hidden": true
+        },
+        {
+          "id": "next-action-date",
+          "type": "date",
+          "model": "nextActionDate",
+          "required": true,
+          "apiField": "Next_Action_Date"
+        }
+      ],
+      "branch_map_name": "CHURN_REASON_TO_BRANCH",
+      "branch_map": {
+        "Price": "price",
+        "Lost To Competitor": "lostToCompetitor",
+        "Bad Service Experience": "badService",
+        "No Current Need": "noNeed",
+        "Internal Maintenance": "internalMaintenance",
+        "Location / Coverage": "location",
+        "Service Availability": "serviceAvailability",
+        "Billing / Payment": "billing",
+        "Communication / Trust": "communication",
+        "Driver Related": "driver",
+        "Company / Management": "company"
+      },
+      "unmapped_churn_reason_values": [
+        "Fleet Reduced",
+        "Business Slowdown",
+        "Business Closed",
+        "Hard Refusal",
+        "Other"
+      ],
+      "computed": {
+        "churnBranch": "CHURN_REASON_TO_BRANCH[churnReason] || ''",
+        "showWhatCouldBringBack": "['High','Medium','Low'].includes(returnPossibility) — deliberately excludes 'Unknown', a judgment call not stated by the spec"
+      },
+      "submit_logic": "apiData spreads in this exact order (order matters for which value wins on key collisions): (1) ...incomingHandoff.reEngagementFields (if any) FIRST — lowest priority; (2) this form's own Maintenance_Offers/Conversation_Type/Call_Outcome/Next_Action_Date/Owner/Churn_Reason — these override any stale handoff values for the same keys; (3) ...branchFields (from THIS form's own churnBranch) — spread LAST specifically to overwrite any stale reason-branch fields left over from the Re-engagement handoff's different reason; (4) Lost_Services/Return_Possibility/What_Could_Bring_Client_Back appended after. Then createTouchpoint(apiData) -> alert -> closeReload. This is the ONLY createTouchpoint call for a handed-off flow — Re-engagement's data and Churned's data merge into one record here."
+    }
+  },
+  "shared_component": {
+    "name": "ReasonBranchFields",
+    "file": "src/components/forms/ReasonBranchFields.vue",
+    "mounted_by": [
+      "ActiveClientFeedbackForm",
+      "ReEngagementForm",
+      "ChurnedFeedbackForm"
+    ],
+    "purpose": "Single definition of the reason-dependent conditional field tree, reused by three forms that each have their own top-level reason dropdown with different values. Each parent maps its own dropdown value onto one of the branch keys below via a local lookup object, mounts this component, and calls getApiFields() at submit time.",
+    "props": {
+      "branch": { "type": "String", "default": "''" },
+      "communicationOptions": {
+        "type": "Array",
+        "default": "ReEngagementCommunicationOptions",
+        "overridden_by": "ActiveClientFeedbackForm passes CommunicationIssueOptions"
+      },
+      "communicationFieldKey": {
+        "type": "String",
+        "default": "'Communication_Trust_Issue'",
+        "overridden_by": "ActiveClientFeedbackForm passes 'Communication_Issue'"
+      }
+    },
+    "models_defineModel": {
+      "competitorName": {
+        "type": "String",
+        "default": "''",
+        "lifted_because": "ReEngagementForm reuses it for its own separate 'Lost To Competitor' outcome section; ChurnedFeedbackForm pre-fills it from a Re-engagement handoff"
+      },
+      "whyCompetitorWon": {
+        "type": "String",
+        "default": "''",
+        "lifted_because": "same as competitorName"
+      }
+    },
+    "exposed": ["getApiFields()"],
+    "get_api_fields_returns_always_all_of": [
+      "Price_Issue",
+      "Competitor_Name",
+      "Estimated_Price_Difference",
+      "Competitor_Choice_Reason",
+      "Why_Competitor_Won",
+      "No_Current_Need_Reason",
+      "Internal_Maintenance_Method",
+      "Service_Issue",
+      "Related_Service",
+      "Shop_Name",
+      "Issue_Severity",
+      "Location_Problem",
+      "Needed_State",
+      "Needed_City",
+      "Suggested_Shop",
+      "Service_Availability_Problem",
+      "Billing_Issue",
+      "[communicationFieldKey] (dynamic key)",
+      "Driver_Issue",
+      "Company_Change"
+    ],
+    "note_field_count": "19 fixed-name fields + 1 dynamically-named field (communicationFieldKey) = 20 total from this component.",
+    "branches": {
+      "price": {
+        "fields": [
+          {
+            "apiField": "Price_Issue",
+            "type": "select",
+            "options": "PriceIssueOptions"
+          },
+          {
+            "apiField": "Competitor_Name",
+            "type": "input",
+            "conditional": "priceIssue === 'Competitor Is Cheaper'"
+          },
+          {
+            "apiField": "Estimated_Price_Difference",
+            "type": "select",
+            "options": "EstimatedPriceDifferenceOptions",
+            "conditional": "priceIssue === 'Competitor Is Cheaper'"
+          }
+        ]
+      },
+      "competitorChoice": {
+        "fields": [
+          {
+            "apiField": "Competitor_Choice_Reason",
+            "type": "select",
+            "options": "CompetitorReasonOptions"
+          },
+          { "apiField": "Competitor_Name", "type": "input" }
+        ]
+      },
+      "lostToCompetitor": {
+        "used_by": [
+          "ChurnedFeedbackForm only — no form maps a top-level reason to this branch key in ReEngagementForm; ReEngagementForm's 'Lost To Competitor' is instead its own separate OUTCOME section, not this branch"
+        ],
+        "fields": [
+          { "apiField": "Competitor_Name", "type": "input" },
+          {
+            "apiField": "Why_Competitor_Won",
+            "type": "select",
+            "options": "CompetitorReasonOptions"
+          }
+        ]
+      },
+      "noNeed": {
+        "fields": [
+          {
+            "apiField": "No_Current_Need_Reason",
+            "type": "select",
+            "options": "NoCurrentNeedOptions"
+          }
+        ]
+      },
+      "internalMaintenance": {
+        "fields": [
+          {
+            "apiField": "Internal_Maintenance_Method",
+            "type": "select",
+            "options": "InternalMaintenanceOptions"
+          }
+        ]
+      },
+      "badService": {
+        "fields": [
+          {
+            "apiField": "Service_Issue",
+            "type": "select",
+            "options": "ServiceIssueOptions"
+          },
+          {
+            "apiField": "Related_Service",
+            "type": "select",
+            "options": "RelatedServiceOptions (alias of ServicesDiscussedOptions)"
+          },
+          { "apiField": "Shop_Name", "type": "input" },
+          {
+            "apiField": "Issue_Severity",
+            "type": "select",
+            "options": "IssueSeverityOptions"
+          }
+        ]
+      },
+      "location": {
+        "fields": [
+          {
+            "apiField": "Location_Problem",
+            "type": "select",
+            "options": "LocationProblemOptions"
+          },
+          {
+            "apiField": "Needed_State",
+            "type": "select",
+            "options": "USStateOptions"
+          },
+          { "apiField": "Needed_City", "type": "input" },
+          { "apiField": "Suggested_Shop", "type": "input" }
+        ]
+      },
+      "serviceAvailability": {
+        "fields": [
+          {
+            "apiField": "Service_Availability_Problem",
+            "type": "select",
+            "options": "ServiceAvailabilityProblemOptions"
+          }
+        ]
+      },
+      "billing": {
+        "fields": [
+          {
+            "apiField": "Billing_Issue",
+            "type": "select",
+            "options": "BillingIssueOptions"
+          }
+        ]
+      },
+      "communication": {
+        "fields": [
+          {
+            "apiField": "[communicationFieldKey prop]",
+            "type": "select",
+            "options": "[communicationOptions prop]"
+          }
+        ]
+      },
+      "driver": {
+        "fields": [
+          {
+            "apiField": "Driver_Issue",
+            "type": "select",
+            "options": "DriverIssueOptions"
+          }
+        ]
+      },
+      "company": {
+        "fields": [
+          {
+            "apiField": "Company_Change",
+            "type": "select",
+            "options": "CompanyManagementChangeOptions"
+          }
+        ]
+      }
+    },
+    "silent_failure_mode": "A branch-key typo in any consuming form's lookup object (PRIMARY_CONCERN_TO_BRANCH / REASON_STOPPED_TO_BRANCH / CHURN_REASON_TO_BRANCH) fails silently — the branch simply never activates, no console error. Always cross-check a lookup map's keys against the actual current option-list values, and its VALUES against the exact branch key strings listed under 'branches' above."
+  },
+  "business_requirements": {
+    "source_note": "Structured extraction of the BUSINESS LOGIC from the original formal spec document 'TRUCK.ME — ТЗ ДЛЯ ZOHO CRM: Доработка блоков Active Client / Re-engagement / Churned' (Russian, 4 blocks + 2 cross-cutting sections). The document itself is local/Sales - rengagment_churn_active.docx (gitignored, not in this repo) — its full text was recovered from this project's Claude Code conversation history for this extraction. This section is deliberately NOT a translation or copy-paste of the source text — it is reorganized into rules/state-machines/field-groups so the logic itself, not the prose, is machine-usable. Where implementation differs from the literal spec, an implementation_status field says so explicitly; where the spec's rule is simply not built yet, status is 'not_implemented' and it also appears in known_gaps_deliberately_out_of_scope.",
+    "block_1_active_client": {
+      "purpose": "Periodically collect feedback from a client who is still active (why they use Truck.me, what they like/dislike, problems, improvement ideas) — but at the Account level, not per Service Case, since a large fleet can generate 10-20+ service cases/day.",
+      "feedback_cadence_rule": {
+        "spec": "CRM should track Last_Client_Feedback_Date and Next_Client_Feedback_Date per Account. Recommended (configurable) frequency by fleet size: 1 truck=60 days, 2-20 trucks=60 days, 21-100 trucks=45 days, 101+ trucks=30 days. New Service Cases must NOT reset/change Next_Client_Feedback_Date.",
+        "implementation_status": "not_implemented — ActiveClientFeedbackForm has no cadence tracking at all; it can be opened for the same Account arbitrarily often. See known_gaps_deliberately_out_of_scope.no-active-client-feedback-cadence."
+      },
+      "top_level_gate": {
+        "field": "Does Client Have Any Concerns? (Yes/No)",
+        "rule": "No -> hide all negative/concern fields entirely. Yes -> reveal Primary Concern, and after picking it, reveal ONLY that reason's own conditional fields.",
+        "implementation_status": "implemented — hasConcerns/primaryConcern/concernBranch in ActiveClientFeedbackForm.vue"
+      },
+      "conditional_fields_by_primary_concern": "Same shape as ReasonBranchFields.branches (see shared_component) for: Price, Competitor, Location/Coverage, Service Availability, Bad Service Experience, Billing/Payment, Communication, Driver Experience (spec's original label — implemented as 'Driver Related' for cross-form consistency, see spec_vs_implementation_divergences).",
+      "improvement_field": {
+        "field": "What Can We Improve? (multi-select)",
+        "rule": "Negative feedback by itself must NOT change Funnel Stage. While the client keeps using Truck.me, they remain Active Client regardless of feedback content.",
+        "implementation_status": "implemented by omission — the widget never writes any funnel-stage field from this form, so the rule holds trivially. What_Can_We_Improve itself is a plain multi-select on the touchpoint."
+      }
+    },
+    "block_2_dormant_to_reengagement": {
+      "purpose": "Dormant = a client who previously used Truck.me but stopped, per the funnel logic that already exists outside this spec (not modified by it). This block only adds a clear trigger to START working the client back.",
+      "rule": {
+        "spec": "When a client becomes Dormant, CRM creates a 'Re-engagement Task'. The client stays Dormant. When a Sales Agent actually starts working the client, they click 'Start Re-engagement' -> stage becomes Dormant -> Re-engagement, and a mandatory Re-engagement Form opens.",
+        "implementation_status": "not_implemented — there is no Dormant-awareness, no system-created task, and no 'Start Re-engagement' button anywhere. The ONLY way into ReEngagementForm is picking 'Re-engagement' from HomeForm's plain Conversation option dropdown; any client can be re-engaged at any time from the widget's point of view. See known_gaps_deliberately_out_of_scope.no-start-reengagement-trigger."
+      }
+    },
+    "block_3_reengagement": {
+      "purpose": "The stage where Sales actively tries to win the client back. Needs to capture: why they stopped, the specific reason, what could bring them back, which service to win back, how realistic winning them back is, and how the effort concluded. Ordinary call mechanics (No Answer/Connected/Notes/Next Action) stay on Touchpoints and are NOT duplicated here.",
+      "primary_reason_field": {
+        "field": "Why Did Client Stop Using Truck.me? (dropdown, incl. Unknown)",
+        "rule": "Unknown is allowed when the reason isn't known yet. After the call, the agent should update the reason if they learned more.",
+        "implementation_status": "implemented (ReasonStoppedOptions) — the 'should update after learning more' part is a human/process expectation, not something the UI enforces or could enforce (nothing prevents re-opening a touchpoint's reason field in Zoho directly)."
+      },
+      "bring_back_and_targeting_fields": {
+        "What Can Bring Client Back? (multi-select)": "implemented (WhatCanBringBackOptions)",
+        "Target Service (multi-select)": "implemented (TargetServiceOptions) — spec's option values were a literal service catalog (Oil Change/PM/Tires/Parking/Truck Wash/Towing/Eats/Roadside Assistance/Any Service/Other); implementation deliberately uses ServicesDiscussedOptions + Any Service + Other instead, see spec_vs_implementation_divergences.",
+        "Return Potential (dropdown)": "implemented (ReturnPotentialOptions). Spec rule: 'this field alone does not change Funnel Stage' — true by omission, same as block_1's improvement field."
+      },
+      "status_field": {
+        "field": "Re-engagement Status (dropdown: New/In Progress/Waiting For Client/Waiting For Truck.me Action/Service Expected/Follow-up Later/Ready To Close)",
+        "purpose": "Lets a manager see current Re-engagement state without reading every Touchpoint.",
+        "implementation_status": "implemented (ReEngagementStatusOptions) as a plain field with no derived behavior."
+      },
+      "outcome_state_machine": [
+        {
+          "outcome": "Reactivated",
+          "gate": "Spec: only allowed when there is a genuinely new Service Used record — a promise or 'Interested' response is not sufficient.",
+          "shown_fields": ["What Brought Client Back? (multi-select)"],
+          "stage_transition_spec": "Client exits Re-engagement back into the normal working stage per existing funnel logic.",
+          "implementation_status": "PARTIALLY implemented: What_Brought_Client_Back field exists and is captured (WhatBroughtClientBackOptions). The gate itself ('only with a real Service Used') is NOT enforced anywhere — an agent can select Reactivated freely with no check against actual service records. The stage_transition is NOT implemented — no Zoho stage/funnel field is written by this widget for any outcome except the Churned-bound ones (see block below)."
+        },
+        {
+          "outcome": "Still Working",
+          "shown_fields": [],
+          "stage_transition_spec": "Client stays in Re-engagement; only Re-engagement Status is updated.",
+          "implementation_status": "implemented in spirit — this outcome writes Re_Engagement_Outcome='Still Working' and lets the touchpoint close normally; no stage field is touched (consistent, since spec says stage doesn't change here either)."
+        },
+        {
+          "outcome": "Not Now",
+          "shown_fields": ["Why Not Now? (dropdown)"],
+          "shown_fields_per_spec": ["Why Not Now? (dropdown)", "Next Review Date (date, mandatory)"],
+          "stage_transition_spec": "After saving: Re-engagement -> Dormant.",
+          "implementation_status": "Why Not Now implemented (WhyNotNowOptions). Next Review Date deliberately NOT implemented — see spec_vs_implementation_divergences.next-review-date-dropped-for-consistency. Stage_transition NOT implemented either way — no Zoho write moves the client back to Dormant; left to Zoho-side workflow per the project's explicit 'widget does data capture only' decision (see known_gaps_deliberately_out_of_scope.no-funnel-stage-automation) — in practice this is now the 30-day Dormant schedule in docs/ZOHO_AUTOMATION_PLAN.md, not a direct write from this outcome."
+        },
+        {
+          "outcome": "Unable To Reach",
+          "gate": "Spec: only transitions to Dormant once an established number of contact attempts has been made.",
+          "shown_fields": ["Contactability = 'Unreachable'"],
+          "stage_transition_spec": "Re-engagement -> Dormant, once the attempt threshold is met. Explicitly: Unable To Reach is NOT a form of Churn.",
+          "implementation_status": "Contactability='Unreachable' is set unconditionally whenever this outcome is picked (Contactability: resolvedOutcome === 'Unable To Reach' ? 'Unreachable' : ''). The attempt-count THRESHOLD is not implemented — there's no counting of contact attempts anywhere in this widget. The stage_transition is not implemented, same reason as 'Not Now'."
+        },
+        {
+          "outcome": "Lost To Competitor",
+          "shown_fields": [
+            "Competitor Name (text)",
+            "Why Competitor Won? (dropdown)"
+          ],
+          "stage_transition_spec": "After filling: Re-engagement -> Churned.",
+          "implementation_status": "implemented — this is the one outcome-driven transition the widget actually performs, via the in-widget handoff mechanism (see shared_component / the Re-engagement→Churned handoff in DEVELOPER_GUIDE.md), not a literal Zoho stage-field write. See decision_log."
+        },
+        {
+          "outcome": "Hard Refusal",
+          "shown_fields": ["(spec says: open Churn Form)"],
+          "stage_transition_spec": "After filling: Re-engagement -> Churned.",
+          "implementation_status": "implemented via the same handoff mechanism as Lost To Competitor."
+        },
+        {
+          "outcome": "Out Of Business",
+          "shown_fields": ["(spec says: open Churn Form)"],
+          "stage_transition_spec": "After filling: Re-engagement -> Churned.",
+          "implementation_status": "implemented via the same handoff mechanism, pre-selecting Churned reason 'Business Closed' — a judgment call beyond the literal spec (which just says 'open the Churn Form'), see decision_log and block_4 churn_reason_field mapping note."
+        }
+      ]
+    },
+    "block_4_churned": {
+      "purpose": "Only for clients there is real basis to consider lost — NOT just because they've been inactive a while (that's what Dormant is for). Needs to capture why they left, what exactly was lost, whether a return is plausible, and what could plausibly bring them back. Explicitly: no separate 'Win-back' process is created.",
+      "churn_reason_field": {
+        "field": "Churn Reason (dropdown)",
+        "spec_values": [
+          "Price",
+          "Lost To Competitor",
+          "Bad Service Experience",
+          "No Need",
+          "Internal Maintenance",
+          "Location / Coverage",
+          "Service Availability",
+          "Billing / Payment",
+          "Communication / Trust",
+          "Driver Preference",
+          "Management Decision",
+          "Fleet Reduced",
+          "Business Slowdown",
+          "Business Closed",
+          "Hard Refusal",
+          "Other"
+        ],
+        "implementation_status": "implemented as ChurnReasonOptions with 3 deliberate renames for cross-form taxonomy consistency: 'No Need'->'No Current Need', 'Driver Preference'->'Driver Related', 'Management Decision'->'Company / Management' — see spec_vs_implementation_divergences."
+      },
+      "reuse_instruction": {
+        "spec": "After picking a reason, use the SAME conditional fields already built for Re-engagement — do not create duplicate fields/dictionaries. Example given: Price -> What Is The Price Issue?; Lost To Competitor -> Competitor Name + Why Competitor Won?; Bad Service Experience -> What Went Wrong? + Related Service + Shop Name + Issue Severity; Location/Coverage -> Needed State + Needed City + Suggested Shop.",
+        "implementation_status": "implemented exactly as specified — this is the literal mandate behind extracting shared_component.ReasonBranchFields.vue and mounting it from both ReEngagementForm and ChurnedFeedbackForm (and later also ActiveClientFeedbackForm, extending the same principle one step further than the spec explicitly asked for)."
+      },
+      "lost_services_field": {
+        "field": "Lost Services (multi-select)",
+        "implementation_status": "implemented as LostServicesOptions — spec's literal option values were the same truck-service-catalog list as block_3's Target Service; implementation deliberately uses ServicesDiscussedOptions + All Services + Other instead, see spec_vs_implementation_divergences.",
+        "required": "mandatory per block_4.validation_rules"
+      },
+      "return_possibility_field": {
+        "field": "Return Possibility (dropdown: High/Medium/Low/No Chance/Unknown)",
+        "purpose": "Analytical only — understand how definitively lost the client is. Does not trigger a separate process.",
+        "implementation_status": "implemented (ReturnPossibilityOptions), required per validation_rules."
+      },
+      "what_could_bring_back_field": {
+        "field": "What Could Bring Client Back? (multi-select)",
+        "rule": "Shown (and per validation_rules, mandatory) when Return Possibility is High/Medium/Low. Explicitly NOT shown when Return Possibility = No Chance.",
+        "spec_silence": "The spec never states what should happen when Return Possibility = Unknown.",
+        "implementation_status": "implemented as showWhatCouldBringBack = ['High','Medium','Low'].includes(returnPossibility) — this also excludes Unknown, which is a judgment call filling the spec's silence, not a documented requirement. Consistent with the spec's explicit High/Medium/Low + explicit No Chance cases; Unknown was simply never addressed by the source document."
+      },
+      "validation_rules": [
+        {
+          "rule": "Cannot move a client to Churned without a Churn Reason.",
+          "implementation_status": "moot in current architecture — the widget never writes a Zoho stage/funnel field for any transition, Churned included, so there's no 'moving to Churned' Zoho-side action to gate. Churn_Reason IS a required form field (:required=\"true\")."
+        },
+        {
+          "rule": "If the selected reason has a Detailed Reason defined, it's mandatory.",
+          "implementation_status": "implemented — every active ReasonBranchFields branch field is :required=\"true\"."
+        },
+        {
+          "rule": "Lost Services is mandatory.",
+          "implementation_status": "implemented (:required=\"true\")."
+        },
+        {
+          "rule": "Return Possibility is mandatory.",
+          "implementation_status": "implemented (:required=\"true\")."
+        },
+        {
+          "rule": "If Return Possibility = High/Medium/Low, What Could Bring Client Back is mandatory.",
+          "implementation_status": "implemented (conditional + :required=\"true\" together)."
+        },
+        {
+          "rule": "If Return Possibility = No Chance, no further action is required.",
+          "implementation_status": "implemented (field hidden, sent as [])."
+        },
+        {
+          "rule": "No separate Win-back stage is ever created.",
+          "implementation_status": "implemented by omission — no such stage/entity exists anywhere in the app."
+        },
+        {
+          "rule": "Client remains Churned until a human manually decides to restart Re-engagement.",
+          "implementation_status": "implemented by omission — nothing in this widget can move a client OUT of Churned automatically; the only path back into Re-engagement is a human picking it fresh from HomeForm, same as any other conversation type."
+        }
+      ]
+    },
+    "general_conditional_fields_rule": {
+      "principle": "Agent should never see every field at once. Interface logic must always be Primary Reason -> Detailed Reason -> additional data, one level revealed at a time.",
+      "cross_form_mandate": {
+        "spec": "Use this logic identically across Active Client Feedback, Re-engagement, and Churned. Do not build three different sets of the same reasons.",
+        "fulfillment_status": "PARTIALLY fulfilled, and this is a known/accepted partial: the DOWNSTREAM conditional-field trees for a given reason ARE fully shared across all three forms (ReasonBranchFields.vue, one implementation, one set of dictionaries). What remains as 3 separate lists is each form's own TOP-LEVEL reason dropdown (PrimaryConcernOptions / ReasonStoppedOptions / ChurnReasonOptions) — judged acceptable rather than a gap, because each stage's reason taxonomy legitimately differs in scope: e.g. 'Business Slowdown'/'Fleet Reduced'/'Unknown' only make sense once a client has actually stopped, so they can't be pruned from Re-engagement/Churned's lists, and 'Other' aside, Active Client's list has no equivalent-but-differently-worded entries left unmerged. See option_lists_index for the actual reconciliation performed (renames + the CompetitorReasonOptions merge)."
+      }
+    },
+    "integrator_summary_state_machine": {
+      "note": "Spec's own condensed 'КРАТКАЯ ЛОГИКА ДЛЯ ИНТЕГРАТОРА' section, restated as a chain — matches app_flow above but stated independently as the spec's own intended shape, for comparison.",
+      "active_client": "likes -> why they use it -> any problems? -> what specifically -> what to improve. Never once per Service Case.",
+      "dormant_to_reengagement": "Dormant client gets a Re-engagement Task -> agent clicks Start Re-engagement -> stage becomes Re-engagement.",
+      "reengagement": "why stopped -> specific reason -> what could bring back -> Target Service -> Return Potential -> THEN: new Service Used => Reactivated | work continues => stays Re-engagement | Not Now => Dormant | Unable To Reach => Dormant | confirmed loss => Churned.",
+      "churned": "why left -> detailed reason -> what was lost -> can they return? -> what could bring them back -> process ends. No separate Win-back process."
+    }
+  },
+  "spec_vs_implementation_divergences": [
+    {
+      "id": "next-review-date-dropped-for-consistency",
+      "affected_fields": ["Next_Review_Date (Re-engagement, 'Not Now' outcome)"],
+      "spec_said": "Not Now outcome requires both 'Why Not Now?' and a mandatory 'Next Review Date' — a distinct field from Next_Action_Date, specific to this one outcome.",
+      "implementation_does": "Next_Review_Date was actually implemented on 2026-08-21 (field, layout rule, and a Deluge task-automation branch using it as the due date), then removed again the same day. Not Now now uses the same Next_Action_Date every other outcome/form uses — no second date field.",
+      "reason": "Explicit product decision: use Next_Action_Date consistently across every outcome and every form rather than add an outcome-specific date field, even though the spec calls for a distinct one here.",
+      "authoritative_going_forward": "No Next_Review_Date field anywhere in this widget. If a Next_Review_Date field or layout rule was created in Zoho Setup during the brief window it existed, it's safe to leave unused or delete."
+    },
+    {
+      "id": "service-catalog-fields-use-services-discussed-not-literal-spec-catalog",
+      "affected_fields": [
+        "Related_Service (Active Client + shared badService branch)",
+        "Target_Service (Re-engagement)",
+        "Lost_Services (Churned)"
+      ],
+      "spec_said": "A literal truck-service-catalog list: Oil Change, PM, Tires, Parking, Truck Wash, Towing, Eats, Roadside Assistance (+ per-field extras: Other / Any Service / All Services).",
+      "implementation_does": "Uses ServicesDiscussedOptions (Oil & PM Services, Tire Services, Mechanical Repairs, Inspections, Wash & Cleaning, Parking, Roadside Assistance, Dealership) as the base list instead, plus the same per-field extras.",
+      "reason": "Explicit user correction during development: 'i dont think ServiceCatalogOptions is right list. we need to use options from ServicesDiscussedOptions list. it is the list of our service types' — ServicesDiscussedOptions reflects Truck.me's ACTUAL current service catalog (also used by IntroForm), whereas the spec's literal wording was treated as illustrative, not authoritative on exact service names.",
+      "authoritative_going_forward": "ServicesDiscussedOptions-derived lists are correct; do not revert to the spec's literal wording."
+    },
+    {
+      "id": "reason-taxonomy-renames-for-cross-form-consistency",
+      "affected_fields": [
+        "Primary_Concern (Active Client)",
+        "Churn_Reason (Churned)"
+      ],
+      "spec_said": "Active Client: 'Driver Experience'. Churned: 'No Need', 'Driver Preference', 'Management Decision'.",
+      "implementation_does": "Renamed to 'Driver Related' (Active Client), and 'No Current Need' / 'Driver Related' / 'Company / Management' (Churned).",
+      "reason": "Reconcile near-duplicate concepts that were worded differently only because the spec wrote each block somewhat independently — done in service of the general_conditional_fields_rule's cross-form-consistency mandate, at the option-list level rather than only the branch-key level.",
+      "authoritative_going_forward": "Renamed values are correct; do not revert to the spec's original wording for these three."
+    },
+    {
+      "id": "competitor-reason-lists-merged-with-wording-reconciliation",
+      "affected_fields": [
+        "Competitor_Choice_Reason (Active Client 'Why Does Client Prefer Competitor?' / Re-engagement 'Why Did Client Choose Competitor?')",
+        "Why_Competitor_Won (Re-engagement outcome section + shared lostToCompetitor branch)"
+      ],
+      "spec_said": "Three near-identical but not-quite-matching lists across the three source locations — notably 'Long-Term Relationship' (Active Client) vs 'Existing Relationship' (Re-engagement reason) vs neither wording present verbatim in the 'Why Competitor Won' outcome list, and 'Better Shop Network' present in 2 of the 3 lists but not the third.",
+      "implementation_does": "Single merged CompetitorReasonOptions (14 values) used by all three call sites, keeping 'Existing Relationship' (majority wording) and 'Better Shop Network' (present in 2 of 3 source lists).",
+      "reason": "The three lists were judged to be the same underlying concept with accidental wording drift, not intentionally different questions — contrast the Communication lists below, which were judged genuinely different.",
+      "authoritative_going_forward": "Single CompetitorReasonOptions is correct; do not re-split it per caller."
+    },
+    {
+      "id": "communication-lists-correctly-kept-separate-per-spec",
+      "affected_fields": [
+        "Communication_Issue (Active Client)",
+        "Communication_Trust_Issue (Re-engagement/Churned)"
+      ],
+      "spec_said": "Active Client's 'What Is The Communication Issue?' (support-responsiveness focus: Slow Response, Poor Sales Communication, Poor Customer Support, Too Many Calls, Does Not Know Who To Contact, ...) is a GENUINELY DIFFERENT question from Re-engagement/Churned's 'Communication / Trust' (trust focus: Does Not Trust Truck.me, Does Not Trust Shops, No Relationship With Agent, ...) — the spec itself gives these two blocks different field labels and different option sets from the start.",
+      "implementation_does": "Two separate option lists (CommunicationIssueOptions / ReEngagementCommunicationOptions) AND, per the user's final decision, two separate Zoho fields (Communication_Issue / Communication_Trust_Issue via ReasonBranchFields' communicationFieldKey prop).",
+      "reason": "This is NOT a divergence from spec intent — the spec already treats these as different questions. It's flagged here only because mid-development there was a period where both were merged onto one field/list before the split was reconsidered and correctly reverted; see decision_log.",
+      "authoritative_going_forward": "Keep separate — this matches the spec, it was never actually spec-compliant to merge them."
+    },
+    {
+      "id": "out-of-business-prefills-business-closed-churn-reason",
+      "affected_fields": [
+        "Churn_Reason (via the Re-engagement->Churned handoff)"
+      ],
+      "spec_said": "For Outcome = Out Of Business: 'Open the Churn Form. After filling: Re-engagement -> Churned.' Does not say whether the Churn Reason should be pre-selected or left for the agent to pick.",
+      "implementation_does": "Pre-selects Churn_Reason = 'Business Closed' when handing off from this specific outcome (CHURN_REASON_BY_OUTCOME in ReEngagementForm.vue).",
+      "reason": "Judgment call filling a spec silence — 'Out Of Business' as a Re-engagement outcome and 'Business Closed' as a Churn reason are obviously the same real-world fact, so pre-filling avoids asking the agent to redundantly re-state it.",
+      "authoritative_going_forward": "Acceptable as-is; a one-line change in CHURN_REASON_BY_OUTCOME if product ever wants it to prompt fresh instead."
+    }
+  ],
+  "option_lists_index": {
+    "file": "src/config/select-options.js",
+    "organizing_principle": "Sectioned by consumer via comments, not alphabetical. Merge/split decisions are documented inline per export.",
+    "merged_no_longer_exist": {
+      "HasConcernsOptions": "merged into YesNoOptions (was an exact duplicate)",
+      "ServiceCatalogOptions": "deleted; RelatedServiceOptions/TargetServiceOptions/LostServicesOptions rebuilt on ServicesDiscussedOptions instead (the actual service catalog) per explicit user correction",
+      "CompetitorPreferenceReasonOptions / WhyChoseCompetitorOptions / WhyCompetitorWonOptions": "merged into single CompetitorReasonOptions"
+    },
+    "deliberately_kept_separate_families": {
+      "communication": {
+        "CommunicationIssueOptions": "Active Client Feedback only — support-responsiveness focus. Writes to Communication_Issue field.",
+        "ReEngagementCommunicationOptions": "Re-engagement/Churned default — trust focus. Writes to Communication_Trust_Issue field.",
+        "resolution": "Two genuinely different questions -> kept as two option lists AND two Zoho fields (final user decision, see decision_log)."
+      },
+      "what_could_bring_back_family": {
+        "WhatCanBringBackOptions": "Re-engagement, while still ongoing",
+        "WhatBroughtClientBackOptions": "Re-engagement, Reactivated outcome specifically (past tense, narrower)",
+        "WhatCouldBringChurnedBackOptions": "Churned form",
+        "resolution": "All three intentionally distinct per spec; not merged."
+      },
+      "competitor_name_and_reason_fields": {
+        "Competitor_Choice_Reason": "written by ReasonBranchFields' competitorChoice branch — an ONGOING concern (client is considering/comparing a competitor)",
+        "Why_Competitor_Won": "written by ReasonBranchFields' lostToCompetitor branch AND ReEngagementForm's own Lost-To-Competitor outcome section — a CONFIRMED loss reason",
+        "resolution": "Analyzed and recommended to KEEP SEPARATE (ongoing vs. confirmed-loss semantics differ) — user has not given a final explicit decision on this; do not merge without the user re-raising it (see open_questions)."
+      }
+    },
+    "renames_for_taxonomy_consistency": {
+      "PrimaryConcernOptions": {
+        "Driver Experience": "renamed to Driver Related"
+      },
+      "ChurnReasonOptions": {
+        "No Need": "renamed to No Current Need",
+        "Driver Preference": "renamed to Driver Related",
+        "Management Decision": "renamed to Company / Management"
+      }
+    }
+  },
+  "zoho_layout_verification": {
+    "performed": "2026-08-20",
+    "source": "local/layout.json (gitignored) — a full Zoho CRM layout export for Maintenance_Touchpoints, provided by the user and diffed field-by-field, value-by-value against src/config/select-options.js and this file's forms/shared_component sections.",
+    "result": "The Zoho layout already exists with exactly the 6 content sections this file/TOUCHPOINT_LAYOUT.md describe (Call Info, Intro Details, Active Client Feedback, Concern / Reason Details, Re-engagement, Churned) plus 2 system sections (Record Image, Information) and 2 quick-create/business-card sections. Every field name and section grouping this file/TOUCHPOINT_LAYOUT.md/DEVELOPER_GUIDE.md describe is CONFIRMED present with the correct data_type. Of 41 picklist/multiselect fields checked value-for-value in exact order, 39 match select-options.js exactly.",
+    "upgrade_note": "Prior to this verification, every field name in this project's docs was flagged as 'inferred from spec label, not confirmed'. That caveat is now resolved for the Maintenance_Touchpoints module — treat field names as confirmed, not just inferred. The 2 value-set exceptions found (below) and the Owner-field-shape question have both since been resolved directly by the user — see known_bugs_fixed_this_project for all 4 resolutions (2 Zoho Setup picklist fixes, Owner shape confirmed working, and Owner now sent by every form including ActiveClientFeedbackForm).",
+    "confirmed_exceptions_now_fixed": [
+      {
+        "field": "Conversation_Type",
+        "was": "Live Zoho picklist values were ['Intro','Follow-up','Promo','Re-engagement','Post-service feedback'] — missing 'Active Client Feedback' and 'Churned Feedback', both of which select-options.js's ConversationTypes and the widget actively send. ('Follow-up'/'Promo' exist in Zoho but aren't in the widget's dropdown — that's fine, intentionally unused, not a gap.)",
+        "fixed": "2026-08-20 — user added the 2 missing picklist values directly in Zoho Setup. No code change was needed or made."
+      },
+      {
+        "field": "Main_Reason",
+        "was": "Live Zoho picklist had 'Trust' and 'Driver Preference' collapsed into a single value 'Trust · Driver Preference', instead of the 2 separate values select-options.js's MainReasonOptions sends. Likely cause: TOUCHPOINT_LAYOUT.md used to join option-list items with ' · ' inside a single table cell; whoever configured this picklist in Zoho Setup likely copy-pasted a cell chunk without splitting on the separator.",
+        "fixed": "2026-08-20 — user split the picklist back into 'Trust' and 'Driver Preference' directly in Zoho Setup. No code change was needed or made. TOUCHPOINT_LAYOUT.md's separator was also changed from ' · ' to ', ' throughout, to prevent the same copy-paste mistake on any other field."
+      }
+    ]
+  },
+  "known_bugs": [
+    {
+      "id": "post-service-no-finally",
+      "file": "src/components/forms/PostServiceFeedbackForm.vue",
+      "fn": "submitPostServiceFeedback",
+      "status": "open",
+      "description": "No .finally() around the async chain (createTouchpoint -> getRecord -> Promise.all(updateMaintenanceRequests)). If any call throws, isLoading never resets to false — Submit button stays disabled forever with no user feedback."
+    },
+    {
+      "id": "post-service-dead-getrecord",
+      "file": "src/components/forms/PostServiceFeedbackForm.vue",
+      "fn": "submitPostServiceFeedback",
+      "status": "open",
+      "description": "Calls ZOHO.CRM.API.getRecord right after creating the touchpoint purely to console.log the result. Dead code, safe to remove."
+    },
+    {
+      "id": "no-per-record-status-check",
+      "file": "src/utils/touchpoint.js, src/utils/maintenanceRequests.js, all forms",
+      "status": "open",
+      "description": "Nothing anywhere checks the per-record status/code Zoho returns from insertRecord/updateRecord. A resolved .then() does not guarantee the record actually saved. Applies globally, not form-specific."
+    },
+    {
+      "id": "post-service-missing-request-id-fallback-key",
+      "file": "src/components/forms/PostServiceFeedbackForm.vue",
+      "status": "open",
+      "description": "Request table row key is `request.id || JSON.stringify(request)` — that fallback only makes sense if request.id can sometimes be missing. If it ever is, the checkbox's :value=\"request.id\" pushes undefined into selectedRequests, and updateMaintenanceRequests calls updateRecord with id: undefined, failing silently per-record (compounded by no-per-record-status-check above). Either confirm msGetMaintenanceRequests always returns an id, or filter out rows without one before they're selectable."
+    },
+    {
+      "id": "home-form-no-catch-on-maintenance-offer-fetch",
+      "file": "src/components/forms/HomeForm.vue",
+      "status": "open",
+      "description": "fetchMaintenanceOffer() (from useMaintenanceOfferStore) is called fire-and-forget with no .catch, same as fetchUser() elsewhere. Functionally harmless — availableConversationTypes already falls back to showing every option when maintenanceOffer hasn't loaded — but an unhandled promise rejection on failure is still console noise worth cleaning up."
+    },
+    {
+      "id": "post-service-dead-debug-comment",
+      "file": "src/components/forms/PostServiceFeedbackForm.vue",
+      "status": "open",
+      "description": "Leftover commented-out debug line: <!-- <pre>{{ JSON.stringify(reqData, null, 2) }}</pre> -->. Harmless, safe to delete, same category as Clock.vue."
+    },
+    {
+      "id": "owner-blank-race-condition",
+      "file": "all forms",
+      "status": "open",
+      "description": "Every form reads user.value?.id || '' at submit time from a fetchUser() fired at setup with nothing blocking Submit until it resolves. An agent submitting fast enough (or on a slow connection) sends Owner: '' silently — no error, no warning. Applies identically across all six forms."
+    },
+    {
+      "id": "reengagement-status-can-drift-from-outcome",
+      "file": "src/components/forms/ReEngagementForm.vue",
+      "status": "open, business-logic gap not a code bug",
+      "description": "Re_Engagement_Status (New/In Progress/.../Ready To Close) is a free-standing manual field with no link to isClosingReEngagement/Re_Engagement_Outcome. Nothing stops submitting Re_Engagement_Status: 'New' alongside outcome 'Reactivated', or 'Ready To Close' while isClosingReEngagement: 'No' — two independent trackers of process state that can silently disagree, with nothing in the record indicating which to trust."
+    },
+    {
+      "id": "active-client-no-sentiment-cross-check",
+      "file": "src/components/forms/ActiveClientFeedbackForm.vue",
+      "status": "open, business-logic gap not a code bug",
+      "description": "Overall_Experience and Has_Concerns are collected fully independently — Overall_Experience: 'Very Unsatisfied' + Has_Concerns: 'No' is a direct, unvalidated contradiction. Similarly What_Can_We_Improve stays fillable regardless of Has_Concerns, so 'No concerns' plus a list of specific improvement asks is also possible."
+    },
+    {
+      "id": "post-service-no-negative-feedback-detail",
+      "file": "src/components/forms/PostServiceFeedbackForm.vue",
+      "status": "open, business-logic gap not a code bug",
+      "description": "Every other negative-signal path in this app (Active Client/Re-engagement/Churned's Bad Service Experience) opens a detail branch: what went wrong, which service, shop name, severity. Post-Service Feedback has no equivalent — if Service_Satisfaction: Bad, nothing captures why. Asymmetric with how every other form handles a negative signal. Also unvalidated: Service_Satisfaction: Bad + Will_Use_Again: Yes is a plausible-but-uncommented-on combination."
+    },
+    {
+      "id": "unconfirmed-field-names",
+      "status": "RESOLVED for both modules. Maintenance_Touchpoints confirmed 2026-08-20 via a real layout export — see zoho_layout_verification (39/41 picklist fields matched exactly, the 2 value-set discrepancies found have since been fixed in Zoho Setup, see known_bugs_fixed_this_project). Maintenance_Request confirmed 2026-08-21 — not via a layout export this time, but by the user directly: PostServiceFeedbackForm's feedback data (Service_Satisfaction, Will_Use_Again, Shop_Rating, Maintenance_Agent_Rating, Touchpoint) is saving correctly in production.",
+      "description": "Every Zoho field API name across the whole app was inferred from the spec's on-screen label originally. Both modules this widget writes to are now confirmed correct — no remaining unverified field names anywhere in the app."
+    }
+  ],
+  "known_bugs_fixed_this_project": [
+    {
+      "id": "rating-options-numeric-vs-picklist-string",
+      "file": "src/config/select-options.js, src/components/forms/PostServiceFeedbackForm.vue",
+      "fixed": true,
+      "description": "ratingOptions used numeric JS values (1-5) even though Shop_Rating/Maintenance_Agent_Rating are Zoho picklist fields, which always send/return string values (\"3\", not 3). This broke the 2026-08-21 per-row-ratings change specifically for pre-filling: initializing shopRatings/agentRatings from an already-fetched request's existing rating didn't work as intended, since a strict string from the API wouldn't match a numeric option.value. Fixed by changing ratingOptions to string values, and by having fetchRequests() pre-fill from request.Shop_Rating/request.Maintenance_Agent_Rating (String(...)-coerced) instead of always resetting every row to blank.",
+      "generalized_rule": "Match option-list value types to the actual Zoho field type, not to what's convenient in JS — a picklist field's values are always strings over the API, even if they look numeric. A number vs. string mismatch fails silently (no error, just 'nothing pre-selects'), so it's easy to miss until you specifically test pre-filling from existing data rather than only testing fresh user selections."
+    },
+    {
+      "id": "reactive-proxy-clone-failure",
+      "file": "src/utils/touchpoint.js, src/utils/maintenanceRequests.js",
+      "fixed": true,
+      "description": "Every form assigns multiselect payload fields directly as someRef.value (e.g. Services_Discussed, Client_Likes, Target_Service, What_Can_Bring_Client_Back) — this copies a reference to Vue's reactive Proxy-wrapped array, not a plain array. ZOHO.CRM.API.insertRecord hands data to the parent frame via postMessage internally, and a Proxy can't survive that structured-clone step, throwing '[object Object] could not be cloned' on submit. Surfaced 2026-08-21 via ReEngagementForm (caught by console.log(reEngagementFields) showing Target_Service/What_Can_Bring_Client_Back as Proxy(Array) instead of a plain array), but latent in every form with a multiselect field. Fixed centrally: both createTouchpoint and updateMaintenanceRequests now run their input through JSON.parse(JSON.stringify(...)) before calling ZOHO.CRM.API, stripping all reactivity.",
+      "generalized_rule": "Never assign a ref()'s .value directly into an object that crosses the ZOHO.CRM.API boundary without deep-cloning it first — Vue's reactive Proxy wrapping survives the assignment and breaks postMessage's structured-clone step. Fix once at the shared utility choke point (createTouchpoint/updateMaintenanceRequests), not per-form, so new fields/forms can't reintroduce it."
+    },
+    {
+      "id": "active-client-concern-branch-stale-gate",
+      "file": "src/components/forms/ActiveClientFeedbackForm.vue",
+      "fixed": true,
+      "description": "concernBranch computed originally read only primaryConcern, not hasConcerns. Toggling hasConcerns Yes -> pick a concern -> back to No left the concern's sub-fields rendered and their stale answers flowing into the payload, even though Primary_Concern itself correctly reset. Fixed by gating the whole computed on hasConcerns === 'Yes' first.",
+      "generalized_rule": "Any computed branch/gate driven by an outer yes/no PLUS an inner reason-select must depend on BOTH, not just the reason — otherwise the reason ref's non-self-resetting nature leaks stale sub-fields after backing out of the outer gate."
+    },
+    {
+      "id": "zoho-conversation-type-picklist-missing-values",
+      "file": "Zoho Setup (not this repo)",
+      "fixed": true,
+      "description": "Live Conversation_Type picklist was missing 'Active Client Feedback' and 'Churned Feedback', discovered via a 2026-08-20 layout-export diff. User added both values directly in Zoho Setup. No code change involved."
+    },
+    {
+      "id": "zoho-main-reason-picklist-merged-value",
+      "file": "Zoho Setup (not this repo)",
+      "fixed": true,
+      "description": "Live Main_Reason picklist had 'Trust' and 'Driver Preference' merged into one value ('Trust · Driver Preference'), discovered via the same layout-export diff — likely caused by a copy-paste of an early TOUCHPOINT_LAYOUT.md table cell that joined list items with ' · '. User split it back into 2 values directly in Zoho Setup. No code change involved. TOUCHPOINT_LAYOUT.md's separator was changed to ', ' to prevent recurrence."
+    },
+    {
+      "id": "owner-field-shape-confirmed-working",
+      "file": "src/store/user.js usage across all forms",
+      "fixed": true,
+      "description": "Owner is an ownerlookup-type field (confirmed via layout export), distinct from the plain 'lookup' type Maintenance_Offers uses. Sending the same bare user-ID-string shape for Owner as is used for Maintenance_Offers was unconfirmed for that field type — user confirmed 2026-08-20 that it works correctly in practice. No code change needed for the shape itself."
+    },
+    {
+      "id": "active-client-no-owner",
+      "file": "src/components/forms/ActiveClientFeedbackForm.vue",
+      "fixed": true,
+      "description": "This form was the only one that never called useUserStore()/sent Owner. User decided (2026-08-20) Owner should be sent by every form. Fixed: added useUserStore()/fetchUser() and Owner: user.value?.id || '' to this form's apiData, matching every other form's pattern exactly."
+    }
+  ],
+  "known_gaps_deliberately_out_of_scope": [
+    {
+      "id": "no-funnel-stage-automation",
+      "description": "No Dormant->Re-engagement, Re-engagement->Dormant/Churned, or 'Reactivated requires a real Service Used' gate automation anywhere IN THIS WIDGET. Still true and still the right split: widget does data capture only, Zoho-side workflows/blueprints/schedules own stage transitions. Do not add ZOHO.CRM.API.updateRecord calls for stage fields to src/ without re-confirming this split still holds.",
+      "status_update_2026-08-21": "See docs/ZOHO_AUTOMATION_PLAN.md. PARTIALLY LIVE now: the Re-engagement/Churned Lifecycle_Status writes are built (Field Update workflow actions on Maintenance_Touchpoints). The reactivation guard, Dormant schedule, and monthly rollover are drafted as real Deluge code in that doc but not yet deployed. The stage field is Maintenance_Sales.Lifecycle_Status; this gap entry stays accurate for the widget's own code either way — none of this touches src/."
+    },
+    {
+      "id": "no-start-reengagement-trigger",
+      "description": "Only entry to Re-engagement form is picking it from HomeForm's plain dropdown. No Dormant-awareness, no system-created task gating it, IN THIS WIDGET.",
+      "status_update_2026-08-21": "RESOLVED and LIVE: per docs/ZOHO_AUTOMATION_PLAN.md, creating a Re-engagement touchpoint is itself the 'Start Re-engagement' trigger (Field Update workflow action sets Lifecycle_Status='Re-engagement' on the related Maintenance_Sales) — no separate button, since product confirmed the Re-engagement form is only ever opened on a client already Dormant. Nothing in src/ changed; the trigger lives entirely in Zoho-side automation."
+    },
+    {
+      "id": "no-active-client-feedback-cadence",
+      "description": "Spec calls for Last/Next Client Feedback Date tracked per Account (scheduled by fleet size) so the same client isn't re-surveyed on every service case. Not implemented — ActiveClientFeedbackForm can be opened for the same Account arbitrarily often."
+    }
+  ],
+  "open_questions_not_yet_decided_by_user": [
+    {
+      "id": "competitor-choice-reason-vs-why-competitor-won",
+      "question": "Should Competitor_Choice_Reason and Why_Competitor_Won be merged into one field?",
+      "given_recommendation": "Keep separate — ongoing concern (competitorChoice branch) vs. confirmed loss reason (lostToCompetitor branch + Re-engagement's own outcome section) are different semantics.",
+      "status": "user has not given a final explicit decision; do NOT act on this further unless the user raises it again"
+    }
+  ],
+  "decision_log": [
+    {
+      "decision": "Pre-fill ChurnedFeedbackForm's Return_Possibility from Re-engagement's Return_Potential via a value-mapping lookup (RETURN_POTENTIAL_TO_POSSIBILITY); show What_Can_Bring_Client_Back's prior answer as a context note next to What_Could_Bring_Client_Back instead of pre-filling it",
+      "rationale": "Found via business-logic review (2026-08-21): the Re-engagement->Churned handoff could carry two disagreeing answers to what's essentially the same 'will they come back' question onto one merged record, with nothing to reconcile them. Return_Potential/Return_Possibility map cleanly 1:1 so pre-fill-and-editable (same treatment as churnReason/competitorName) was worth it. What_Can_Bring_Client_Back/What_Could_Bring_Client_Back's option lists don't map cleanly onto each other, so a context note was chosen over a lossy mapping table — cheaper and still kills the silent-contradiction risk."
+    },
+    {
+      "decision": "Merge duplicate HasConcernsOptions into YesNoOptions",
+      "rationale": "exact duplicate"
+    },
+    {
+      "decision": "Merge CompetitorPreferenceReasonOptions/WhyChoseCompetitorOptions/WhyCompetitorWonOptions into CompetitorReasonOptions",
+      "rationale": "wording drift only, same concept"
+    },
+    {
+      "decision": "Delete invented ServiceCatalogOptions, rebuild RelatedServiceOptions/TargetServiceOptions/LostServicesOptions on ServicesDiscussedOptions",
+      "rationale": "user correction: ServicesDiscussedOptions is the actual service-type catalog, the invented list was wrong"
+    },
+    {
+      "decision": "Extract ReasonBranchFields.vue as a shared component across Re-engagement/Churned, later also Active Client Feedback",
+      "rationale": "eliminate copy-pasted conditional-field trees"
+    },
+    {
+      "decision": "Remove relatedServiceOptions override prop from ReasonBranchFields",
+      "rationale": "proven redundant once RelatedServiceOptions became a true alias of ServicesDiscussedOptions for both consumers"
+    },
+    {
+      "decision": "Re-engagement does not create its own touchpoint when handing off to Churned; fields merge into Churned's single createTouchpoint call instead",
+      "rationale": "avoid two touchpoint records for one continuous interaction"
+    },
+    {
+      "decision": "Keep Communication_Issue and Communication_Trust_Issue as two separate Zoho fields with two separate option lists (not one field with a unioned picklist)",
+      "rationale": "user's final call: 'I think we should go on with 2 different fields' — the underlying question genuinely differs by form (support-responsiveness vs. trust), so forcing a shared field would blend two different questions",
+      "implementation": "communicationFieldKey prop added to ReasonBranchFields.vue, defaulting to Communication_Trust_Issue, overridden to Communication_Issue by ActiveClientFeedbackForm"
+    }
+  ],
+  "invariants_to_preserve": [
+    "appState only holds conversationType/callOutcome/entityId/page — never add a form-specific field there.",
+    "Every branch/gate computed that depends on an outer yes/no plus an inner reason-select must check BOTH refs, not just the reason (see known_bugs_fixed_this_project).",
+    "Outcome-dependent payload fields in ReEngagementForm must read the guarded resolvedOutcome, never the raw reEngagementOutcome ref directly.",
+    "ReasonBranchFields.getApiFields() must always return the full fixed key set (blanked for inactive branch) so callers never need per-field ternaries of their own.",
+    "ChurnedFeedbackForm's apiData spread order matters: incomingHandoff.reEngagementFields first, this form's own common fields next, ...branchFields LAST (to clear any stale branch fields from a different reason carried in the handoff).",
+    "Any new page/form must use identical string literals in App.vue, HomeForm.vue's routing chain, and select-options.js's ConversationTypes — no shared constant currently enforces this.",
+    "Do not add Zoho stage-transition writes (Dormant/Re-engagement/Churned funnel fields) from this widget — that's explicitly Zoho workflow/blueprint territory."
+  ],
+  "test_workflow": {
+    "cannot_test_locally": "All ZOHO.CRM.* calls require the real Zoho iframe context; npm run dev cannot exercise them.",
+    "pre_ship_checklist": [
+      "npm run build (vite build && zet pack) — must succeed, refreshes dist/touchpoint_widget.zip",
+      "npx eslint <changed files> — ignore baseline 'ZOHO' is not defined; watch for new errors or no-unused-vars",
+      "If ReasonBranchFields.vue or any of its 3 consumers changed: cross-check the consuming form's branch-map keys against the CURRENT option-list values in select-options.js (silent-failure risk, see shared_component.silent_failure_mode)",
+      "Update docs/AGENT_GUIDE.md, docs/DEVELOPER_GUIDE.md, docs/TOUCHPOINT_LAYOUT.md, and this file in the same change if fields/options/flow actually changed"
+    ],
+    "real_zoho_test_required_for": "Actually submitting each form and confirming records/fields land correctly — no substitute exists."
+  },
+  "related_docs": {
+    "docs/AGENT_GUIDE.md": "non-technical, agent-facing manual — what an agent sees/fills, kept in sync with forms",
+    "docs/DEVELOPER_GUIDE.md": "human-readable technical handoff, prose version of most of what's in this file plus more narrative context",
+    "docs/TOUCHPOINT_LAYOUT.md": "Zoho page-layout field reference (sections, field names, types, exact option values) for setting up/auditing the real CRM module, plus a Layout Rules section (field-level show/hide conditions to configure in Zoho Setup)",
+    "docs/LAYOUT_RULES_TRIGGER_LIST.md": "flat trigger-field -> exact show/hide fields quick-reference, companion to TOUCHPOINT_LAYOUT.md's Layout Rules section",
+    "docs/ZOHO_AUTOMATION_PLAN.md": "DESIGNED, NOT YET IMPLEMENTED plan for Zoho-side Lifecycle_Status funnel automation (Onboarded..Churned), derived from analyzing the zoho/ folder (see below) and re-checking the spec docx on 2026-08-21",
+    "zoho/": "NOT gitignored, but READ-ONLY reference — a snapshot of the live, currently-working Zoho backend automation (data_structure.json, workflow_rules.json, functions/*.deluge) provided by the user for analysis. Never write/edit files here; see memory 'zoho-folder-read-only'. data_structure.json/workflow_rules.json contain earlier LLM-inferred guesses (flagged assumed:true) later corrected against the real .deluge source — see docs/ZOHO_AUTOMATION_PLAN.md's 'Ground truth' section for the corrections.",
+    "local/Sales - rengagment_churn_active.docx": "gitignored — the original formal spec Re-engagement/Churned/Active Client blocks were built against. Its business logic is now structurally captured in this file's business_requirements and spec_vs_implementation_divergences sections; a full field-by-field audit against it also exists as a Claude artifact from project history, not in this repo. Re-read in full on 2026-08-21 to verify docs/ZOHO_AUTOMATION_PLAN.md's transition conditions."
+  }
+}

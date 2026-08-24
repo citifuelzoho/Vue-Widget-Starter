@@ -1,35 +1,12 @@
 import { ref } from 'vue'
 
+// Only fields genuinely shared across forms live here: conversationType/
+// callOutcome/entityId are needed both for HomeForm's own routing and for
+// every sub-form's touchpoint payload, and page drives which form renders.
+// Everything else is local state owned by the form that uses it.
 export const appState = ref({
   conversationType: '',
   callOutcome: '',
-  clientReaction: '',
-  refusalReason: '',
-  refusalConfidence: '',
-  nextActionDate: '',
-  servicesDiscussed: [],
-  summaryNotes: '',
-  overallExperience: '',
-  clientLikes: [],
-  mainReason: '',
-  hasConcerns: '',
-  primaryConcern: '',
-  priceIssue: '',
-  competitorName: '',
-  estimatedPriceDifference: '',
-  competitorPreferenceReason: '',
-  locationProblem: '',
-  neededState: '',
-  neededCity: '',
-  suggestedShop: '',
-  serviceAvailabilityProblem: '',
-  serviceIssue: '',
-  relatedService: '',
-  shopName: '',
-  issueSeverity: '',
-  billingIssue: '',
-  communicationIssue: '',
-  driverIssue: '',
   entityId: '',
   page: 'home'
 })

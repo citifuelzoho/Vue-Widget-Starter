@@ -1,0 +1,19 @@
+string standalone.uLib(String fname,Map opts)
+{
+// 	MAKE COQL CALL
+// opts {"query" : String}
+if(fname == "coql")
+{
+	paramMap = Map();
+	paramMap.put("select_query",opts.get("query"));
+	resp = invokeurl
+	[
+		url :"https://www.zohoapis.com/crm/v8/coql"
+		type :POST
+		parameters:paramMap.toString()
+		connection:"crmfile"
+	];
+	return resp;
+}
+return "";
+}

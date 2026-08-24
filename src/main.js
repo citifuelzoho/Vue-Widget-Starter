@@ -7,7 +7,7 @@ import { autoAnimatePlugin } from '@formkit/auto-animate/vue'
 ZOHO.embeddedApp.on('PageLoad', async function (data) {
   const entityId = data?.EntityId?.[0] || ''
   appState.value.entityId = entityId
-  ZOHO.CRM.UI.Resize({ width: '1000', height: '750' })
+  ZOHO.CRM.UI.Resize({ width: '1200', height: '750' })
   ZOHO.CRM.CONFIG.getCurrentUser().then(function (data) {
     console.log(data)
   })

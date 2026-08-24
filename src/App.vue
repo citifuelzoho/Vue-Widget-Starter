@@ -11,6 +11,14 @@
         v-if="appState.page === 'active-client-feedback'"
         key="active-client-feedback"
       />
+      <ReEngagementForm
+        v-if="appState.page === 're-engagement'"
+        key="re-engagement"
+      />
+      <ChurnedFeedbackForm
+        v-if="appState.page === 'churned-feedback'"
+        key="churned-feedback"
+      />
     </div>
   </main>
 </template>
@@ -20,5 +28,7 @@
   import IntroForm from './components/forms/IntroForm.vue'
   import PostServiceFeedbackForm from './components/forms/PostServiceFeedbackForm.vue'
   import ActiveClientFeedbackForm from './components/forms/ActiveClientFeedbackForm.vue'
+  import ReEngagementForm from './components/forms/ReEngagementForm.vue'
+  import ChurnedFeedbackForm from './components/forms/ChurnedFeedbackForm.vue'
   import { appState } from './store'
 </script>

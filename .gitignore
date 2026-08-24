@@ -5,6 +5,7 @@ dist/
 .DS_Store
 npm-debug.log*
 app/
+local/
 # cert files
 *.crt
 *.pem

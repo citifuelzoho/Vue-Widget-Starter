@@ -1,0 +1,29 @@
+void automation.msseTotalTurnover(String seId)
+{
+seRecord = zoho.crm.getRecordById("Service_Engagement",seId.toNumber());
+// 1. Get the start and end dates of the current month
+startOfMonth = zoho.currentdate.toStartOfMonth().toString("yyyy-MM-dd'T'00:00:00+00:00");
+endOfMonth = zoho.currentdate.toStartOfMonth().addMonth(1).subDay(1).toString("yyyy-MM-dd'T'23:59:59+00:00");
+criterias = {"Service_Engagement='" + seId + "'","Status='In CMP'","Created_Time between '" + startOfMonth + "' and '" + endOfMonth + "'"};
+// 2. Build your COQL select query string dynamically
+coqlQuery = "SELECT id, Discounted_Amount,Created_Time FROM Maintenance_Request WHERE " + standalone.utilCoqlShopCriteria(criterias.toText()) + " limit 2000";
+// 3. Package and send the payload
+currentMonthResponse = standalone.uLib("coql",{"query":coqlQuery});
+lastMonthStart = zoho.currentdate.toStartOfMonth().subMonth(1).toString("yyyy-MM-dd'T'00:00:00+00:00");
+lastMonthEnd = zoho.currentdate.toStartOfMonth().subDay(1).toString("yyyy-MM-dd'T'23:59:59+00:00");
+criterias = {"Service_Engagement='" + seId + "'","Status='In CMP'","Created_Time between '" + lastMonthStart + "' and '" + lastMonthEnd + "'"};
+coqlQuery = "SELECT id, Discounted_Amount, Created_Time FROM Maintenance_Request WHERE " + standalone.utilCoqlShopCriteria(criterias.toText()) + " limit 2000";
+lastMonthResponse = standalone.uLib("coql",{"query":coqlQuery});
+currentMonthTotal = 0;
+for each  rec in currentMonthResponse.get("data")
+{
+	currentMonthTotal = currentMonthTotal + rec.get("Discounted_Amount");
+}
+lastMonthTotal = 0;
+for each  rec in lastMonthResponse.get("data")
+{
+	lastMonthTotal = lastMonthTotal + rec.get("Discounted_Amount");
+}
+zoho.crm.updateRecord("Service_Engagement",seId,{"Total_This_Month":currentMonthTotal,"Total_Last_Month":lastMonthTotal});
+standalone.msUpdateMonthlyUsage(seRecord.get("Maintenance_Offers").get("id"));
+}

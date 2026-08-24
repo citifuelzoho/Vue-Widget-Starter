@@ -1,0 +1,18 @@
+string standalone.utilCoqlShopCriteria(String criteriaString)
+{
+criterias = criteriaString.toCollection(",");
+if(criterias.size() == 1)
+{
+	return criterias.get(0);
+}
+if(criterias.size() == 2)
+{
+	return "(" + criterias.get(0) + " AND " + criterias.get(1) + ")";
+}
+size = criterias.size();
+left = (size / 2).floor();
+right = left + 1;
+left = standalone.utilCoqlShopCriteria(criterias.subList(0,right));
+right = standalone.utilCoqlShopCriteria(criterias.subList(right,size));
+return "(" + left + " AND " + right + ")";
+}

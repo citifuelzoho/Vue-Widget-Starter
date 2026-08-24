@@ -1,0 +1,5 @@
+string standalone.msGetServiceCycle(String service)
+{
+mp = {"Oil & PM Services":30,"Tire Services":30,"Mechanical Repairs":45,"Inspections":100,"Wash & Cleaning":5,"Parking":10,"Roadside Assistance":40,"Dealership":999};
+return ifNull(mp.get(service),99);
+}

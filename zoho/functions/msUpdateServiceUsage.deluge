@@ -1,0 +1,36 @@
+void automation.msUpdateServiceUsage(Int reqId)
+{
+mrRecord = zoho.crm.getRecordById("Maintenance_Request",reqId);
+query = "select id, Name from Maintenance_Sales where Name='" + mrRecord.get("Company_Name").get("name") + "'";
+info query;
+body = Map();
+body.put("select_query",query);
+response = invokeurl
+[
+	url :"https://www.zohoapis.com/crm/v8/coql"
+	type :POST
+	parameters:body.toString()
+	connection:"crmfile"
+];
+msRecord = response.get("data").get(0);
+info msRecord;
+seRecords = zoho.crm.getRelatedRecords("Service_Engagements","Maintenance_Sales",msRecord.get("id"));
+hasSE = false;
+for each  se in seRecords
+{
+	if(se.get("Service_Name") == mrRecord.get("Service_Type"))
+	{
+		updMap = {"Last_Used_Date":mrRecord.get("Used_Date"),"Status":"Used","Name":msRecord.get("Name") + " - " + mrRecord.get("Service_Type")};
+		zoho.crm.updateRecord("Service_Engagement",se.get("id"),updMap,{"trigger":{"workflow"}});
+		hasSE = true;
+		zoho.crm.updateRecord("Maintenance_Request",reqId,{"Service_Engagement":se.get("id")},{"trigger":{"workflow"}});
+	}
+}
+if(!hasSE)
+{
+	createMap = {"Last_Used_Date":mrRecord.get("Used_Date"),"Status":"Used","Maintenance_Offers":msRecord.get("id"),"Name":msRecord.get("Name") + " - " + mrRecord.get("Service_Type"),"Expected_Cycle":standalone.msGetServiceCycle(mrRecord.get("Service_Type")),"Service_Name":mrRecord.get("Service_Type")};
+	seCreateResponse = zoho.crm.createRecord("Service_Engagement",createMap,{"trigger":{"workflow"}});
+	info seCreateResponse;
+	zoho.crm.updateRecord("Maintenance_Request",reqId,{"Service_Engagement":seCreateResponse.get("id")},{"trigger":{"workflow"}});
+}
+}

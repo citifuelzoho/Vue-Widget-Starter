@@ -1,0 +1,18 @@
+string standalone.msUpdateMonthlyUsage(String msId)
+{
+coqlQuery = "Select id,Total_Turnover, Total_Last_Month, Total_This_Month from Service_Engagement where Maintenance_Offers=" + msId;
+coqlResp = standalone.uLib("coql",{"query":coqlQuery});
+total = 0;
+this = 0;
+last = 0;
+for each  rec in coqlResp.get("data")
+{
+	total = total + ifNull(rec.get("Total_Turnover"),0);
+	this = this + ifNull(rec.get("Total_This_Month"),0);
+	last = last + ifNull(rec.get("Total_Last_Month"),0);
+}
+today = zoho.currentdate.toString("yyyy-MM-dd");
+info today;
+zoho.crm.updateRecord("Maintenance_Sales",msId,{"Total_Turnover":total.round(2),"Total_This_Month":this.round(2),"Total_Last_Month":last.round(2),"Last_Turnover_Update":today});
+return "";
+}

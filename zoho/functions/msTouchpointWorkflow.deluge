@@ -1,0 +1,13 @@
+void automation.msTouchpointWorkflow(Int tpId,Int ownerId)
+{
+tpRecord = zoho.crm.getRecordById("Maintenance_Touchpoints",tpId);
+if(tpRecord.get("Call_Outcome") == "Connected" && tpRecord.get("Conversation_Type") == "Intro" && tpRecord.get("Client_Reaction") != "Refused")
+{
+	standalone.mstpIntro(tpId,ownerId);
+}
+else if(tpRecord.get("Call_Outcome") == "Connected" && tpRecord.get("Client_Reaction") == "Refused" && tpRecord.get("Refusal_Confidence") == "Hard")
+{
+	standalone.mstpRefused(tpId);
+}
+standalone.mstpCreateFollowTask(tpId,ownerId);
+}

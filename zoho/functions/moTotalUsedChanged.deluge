@@ -1,0 +1,54 @@
+void automation.moTotalUsedChanged(Int moId)
+{
+query = "Select id, Used_Services, Used_Non_Breakdown_Count from Maintenance_Sales where id=" + moId;
+queryMap = Map();
+queryMap.put("select_query",query);
+response = invokeurl
+[
+	url :"https://www.zohoapis.com/crm/v8/coql"
+	type :POST
+	parameters:queryMap.toString()
+	connection:"crmfile"
+];
+msRecord = response.get("data").get(0);
+info msRecord;
+updMap = Map();
+if(msRecord.get("Used_Services") >= 1)
+{
+	updMap.put("Lifecycle_Status","Activated");
+}
+if(msRecord.get("Used_Services") >= 2)
+{
+	// OR Recurring_Stable_Count >= 1
+	updMap.put("Lifecycle_Status","Active");
+}
+// if (Used_NonBreakdown_Count == 0)
+// {
+//     status = "Unactivated";
+// }
+// else if (Recurring_Stable_Count >= 2)
+// {
+//     status = "Strategic";
+// }
+// else if (Anchor_Stable_Count >= 1)
+// {
+//     status = "Embedded";
+// }
+// else if (Distinct_Services_Used >= 2)
+// {
+//     status = "Adopting";
+// }
+// else
+// {
+//     status = "Trial";
+// }
+if(msRecord.get("Used_Non_Breakdown_Count") == 0)
+{
+	updMap.put("Maturity","Unactivated");
+}
+if(msRecord.get("Used_Non_Breakdown_Count") == 1)
+{
+	updMap.put("Maturity","Trial");
+}
+zoho.crm.updateRecord("Maintenance_Sales",moId,updMap);
+}

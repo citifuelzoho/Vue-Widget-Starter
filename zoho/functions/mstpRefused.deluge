@@ -1,0 +1,8 @@
+string standalone.mstpRefused(Int tpId)
+{
+tpRecord = zoho.crm.getRecordById("Maintenance_Touchpoints",tpId);
+msRecord = zoho.crm.getRecordById("Maintenance_Sales",tpRecord.get("Maintenance_Offers").get("id"));
+updMap = {"Next_Action_Date":tpRecord.get("Next_Action_Date")};
+zoho.crm.updateRecord("Maintenance_Sales",msRecord.get("id"),updMap);
+return "";
+}

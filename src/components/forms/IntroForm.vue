@@ -3,44 +3,36 @@
     <BaseSelect
       id="client-reaction"
       label="Client reaction"
-      v-model="appState.clientReaction"
+      v-model="clientReaction"
       :options="ClientReactionOptions"
       placeholder="Select a client reaction"
       :required="true"
     />
 
     <BaseSelect
-      v-if="appState.clientReaction === 'Refused'"
+      v-if="clientReaction === 'Refused'"
       id="refusal-reason"
       label="Refusal reason"
-      v-model="appState.refusalReason"
+      v-model="refusalReason"
       :options="RefusalReasonOptions"
       placeholder="Select a refusal reason"
       :required="true"
     />
 
     <BaseSelect
-      v-if="appState.clientReaction === 'Refused'"
+      v-if="clientReaction === 'Refused'"
       id="refusal-confidence"
       label="Refusal confidence"
-      v-model="appState.refusalConfidence"
+      v-model="refusalConfidence"
       :options="RefusalConfidenceOptions"
       placeholder="Select a refusal confidence"
-      :required="true"
-    />
-
-    <BaseInput
-      id="next-action-date"
-      label="Next Action date"
-      v-model="appState.nextActionDate"
-      type="date"
       :required="true"
     />
 
     <BaseMultiSelect
       id="services-discussed"
       label="Services Discussed"
-      v-model="appState.servicesDiscussed"
+      v-model="servicesDiscussed"
       :options="ServicesDiscussedOptions"
       :required="true"
     />
@@ -48,9 +40,17 @@
     <BaseTextarea
       id="summary-notes"
       label="Summary Notes"
-      v-model="appState.summaryNotes"
+      v-model="summaryNotes"
       placeholder="Enter summary notes"
       :rows="5"
+      :required="true"
+    />
+
+    <BaseInput
+      id="next-action-date"
+      label="Next Action date"
+      v-model="nextActionDate"
+      type="date"
       :required="true"
     />
 
@@ -77,10 +77,15 @@
     ServicesDiscussedOptions
   } from '../../config/select-options'
   import { createTouchpoint } from '../../utils/touchpoint'
-  import { andSymbolEncode } from '../../utils/andSymbolEncode'
   import { useUserStore } from '../../store/user'
 
   const isLoading = ref(false)
+  const clientReaction = ref('')
+  const refusalReason = ref('')
+  const refusalConfidence = ref('')
+  const nextActionDate = ref('')
+  const servicesDiscussed = ref([])
+  const summaryNotes = ref('')
   const { user, fetchUser } = useUserStore()
   fetchUser()
   async function createIntroTouchpoint() {
@@ -90,20 +95,14 @@
       Maintenance_Offers: appState.value.entityId,
       Conversation_Type: appState.value.conversationType,
       Call_Outcome: appState.value.callOutcome,
-      Client_Reaction: appState.value.clientReaction,
+      Client_Reaction: clientReaction.value,
       Refusal_Reason:
-        appState.value.clientReaction === 'Refused'
-          ? appState.value.refusalReason
-          : '',
+        clientReaction.value === 'Refused' ? refusalReason.value : '',
       Refusal_Confidence:
-        appState.value.clientReaction === 'Refused'
-          ? appState.value.refusalConfidence
-          : '',
-      Next_Action_Date: appState.value.nextActionDate,
-      Services_Discussed: appState.value.servicesDiscussed.map(e =>
-        andSymbolEncode(e)
-      ),
-      Summary_Notes: andSymbolEncode(appState.value.summaryNotes),
+        clientReaction.value === 'Refused' ? refusalConfidence.value : '',
+      Next_Action_Date: nextActionDate.value,
+      Services_Discussed: servicesDiscussed.value,
+      Summary_Notes: summaryNotes.value,
       Owner: user.value?.id || ''
     }
 

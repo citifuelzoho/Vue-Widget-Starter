@@ -1,0 +1,36 @@
+string standalone.mstpCreateFollowTask(Int tpId,Int ownerId)
+{
+tpRecord = zoho.crm.getRecordById("Maintenance_Touchpoints",tpId);
+msRecord = zoho.crm.getRecordById("Maintenance_Sales",tpRecord.get("Maintenance_Offers").get("id"));
+info msRecord;
+targetDate = tpRecord.get("Next_Action_Date").toDate();
+mp = Map();
+mp.put("Subject","Next action was planned on " + targetDate);
+mp.put("$se_module","Maintenance_Sales");
+mp.put("What_Id",msRecord.get("id"));
+mp.put("Who_Id",msRecord.get("Contact").get("id"));
+mp.put("Owner",ownerId);
+mp.put("Due_Date",targetDate);
+// Build reminder time: 19:30 on due date (GMT+5)
+reminderDateTime = targetDate.toString("yyyy-MM-dd") + "T19:30:00+05:00";
+mp.put("Remind_At",{"ALARM":"FREQ=NONE;ACTION=POPUP;TRIGGER=DATE-TIME:" + reminderDateTime});
+mp.put("Status","Not Started");
+mp.put("Send_Notification_Email",true);
+desc = "";
+if(!isNull(tpRecord.get("Summary_Notes")))
+{
+	desc = desc + "Last touchpoint summary: " + tpRecord.get("Summary_Notes") + ". ";
+}
+desc = desc + "Conversation_Type: " + tpRecord.get("Conversation_Type") + ". ";
+desc = desc + "Call Outcome: " + tpRecord.get("Call_Outcome") + ". ";
+desc = desc + "Client Reaction: " + tpRecord.get("Client_Reaction") + ". ";
+desc = desc + "Services Discussed: " + tpRecord.get("Services_Discussed") + ". ";
+if(tpRecord.get("Client_Reaction") == "Refused")
+{
+	desc = desc + "Refusal Reason: " + tpRecord.get("Refusal_Reason") + ". ";
+	desc = desc + "Refusal Confidence: " + tpRecord.get("Refusal_Confidence") + ". ";
+}
+mp.put("Description",desc);
+createTask = zoho.crm.createRecord("Tasks",mp);
+return "";
+}

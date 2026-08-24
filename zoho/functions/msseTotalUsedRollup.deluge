@@ -1,0 +1,30 @@
+void automation.msseTotalUsedRollup(String seId)
+{
+seRecord = zoho.crm.getRecordById("Service_Engagement",seId);
+query = "Select id,Name, Service_Name, Times_Used, Times_Used_Breakdown from Service_Engagement where Maintenance_Offers =" + seRecord.get("Maintenance_Offers").get("id");
+queryMap = Map();
+queryMap.put("select_query",query);
+response = invokeurl
+[
+	url :"https://www.zohoapis.com/crm/v8/coql"
+	type :POST
+	parameters:queryMap.toString()
+	connection:"crmfile"
+];
+totalUsed = 0;
+totalUsedBreakdown = 0;
+currentSe = null;
+for each  se in response.get("data")
+{
+	if(se.get("id") == seId)
+	{
+		currentSe = se;
+	}
+	totalUsed = totalUsed + ifNull(se.get("Times_Used"),0).toNumber();
+	totalUsedBreakdown = totalUsedBreakdown + ifNull(se.get("Times_Used_Breakdown"),0).toNumber();
+}
+zoho.crm.updateRecord("Maintenance_Sales",seRecord.get("Maintenance_Offers").get("id"),{"Total_Used":totalUsed,"Total_Used_Breakdown":totalUsedBreakdown},{"trigger":{"workflow"}});
+updateSe = Map();
+updateSe.put("Planned_Breakdown_Diff",ifNull(currentSe.get("Times_Used"),0).toNumber() - ifNull(currentSe.get("Times_Used_Breakdown"),0).toNumber());
+zoho.crm.updateRecord("Service_Engagement",seId,updateSe,{"trigger":{"workflow"}});
+}

@@ -1,0 +1,72 @@
+{
+  "$schema_description": "Machine-readable workflow rule definitions for the maintenance/service CRM data model (Accounts, Maintenance Requests, Maintenance Offers, Maintenance Touchpoints, Service Engagements). Companion file to data_structure.json.",
+  "generated_date": "2026-08-20",
+  "workflow_rules": [
+    {
+      "id": 1,
+      "module": "Maintenance Requests",
+      "rule_name": "MS Update Service Usage",
+      "trigger_type": "field_update",
+      "trigger_field": "Status",
+      "trigger_condition": "Status is modified to 'Data Entry'",
+      "assumed": true,
+      "note": "Trigger value written as 'Data Entry Face' in source description — assumed to mean the 'Data Entry' status value; confirm exact picklist value.",
+      "function_name": "MS Update Service Usage",
+      "description": "Fires when a Maintenance Request's Status is changed to Data Entry; updates related service usage data (likely refreshing rollups/fields on the related Service Engagement and/or Maintenance Offer)."
+    },
+    {
+      "id": 2,
+      "module": "Maintenance Offers",
+      "rule_name": "MO Create Service Engagements",
+      "trigger_type": "record_created",
+      "trigger_condition": "when record is created",
+      "function_name": "MO Create Services",
+      "description": "Fires on creation of a Maintenance Offer; runs the MO Create Services function to auto-generate the associated Service Engagement record(s)."
+    },
+    {
+      "id": 3,
+      "module": "Maintenance Offers",
+      "rule_name": "MO Total Used",
+      "trigger_type": "field_update",
+      "trigger_field": "Total_Used",
+      "trigger_condition": "when Total Used field is modified",
+      "function_name": "MO Total Used Changed",
+      "description": "Fires when the Total Used field on a Maintenance Offer changes; runs the MO Total Used Changed function.",
+      "related_fields_note": "Total_Used is not part of the previously documented Maintenance Offers rollup fields (Hard_Refusal_Count, Last_Touchpoint_Date, Last_Used_Date, Service_Engagement_Count, Used_Services); it may be a separate field driving or driven by Used_Services — confirm relationship."
+    },
+    {
+      "id": 4,
+      "module": "Service Engagements",
+      "rule_name": "MSSE Total Turnover",
+      "trigger_type": "field_update",
+      "trigger_field": "Total_Turnover",
+      "trigger_condition": "when Total Turnover is modified",
+      "function_name": "MSSE Total Turnover",
+      "description": "Fires when a Service Engagement's Total_Turnover rollup field changes; runs the MSSE Total Turnover function (likely propagates the value up to the related Maintenance Offer or Account)."
+    },
+    {
+      "id": 5,
+      "module": "Service Engagements",
+      "rule_name": "MSSE Total Used Rollup",
+      "trigger_type": "field_update",
+      "trigger_field": "Times_Used",
+      "trigger_condition": "when Times Used field is modified",
+      "function_name": "MSSE Total Used Rollup",
+      "description": "Fires when a Service Engagement's Times_Used rollup field changes; runs the MSSE Total Used Rollup function (likely propagates/aggregates usage counts up to the related Maintenance Offer's Total_Used / Used_Services fields)."
+    },
+    {
+      "id": 6,
+      "module": "Maintenance Touchpoints",
+      "rule_name": "MS Touchpoint Created",
+      "trigger_type": "record_created",
+      "trigger_condition": "when record is created",
+      "function_name": "MS Touchpoint Workflow",
+      "description": "Fires on creation of a Maintenance Touchpoint; runs the MS Touchpoint Workflow function (likely updates rollups such as Hard_Refusal_Count / Last_Touchpoint_Date on the related Maintenance Offer)."
+    }
+  ],
+  "assumptions_and_open_questions": [
+    "Rule 1's trigger condition 'Status is modified to Data Entry Face' is assumed to mean status = 'Data Entry'; the exact picklist value should be confirmed.",
+    "Rule 3 references a 'Total Used' field on Maintenance Offers that wasn't included in the previously defined rollup fields; its relationship to the existing Used_Services / Service_Engagement_Count rollups is unclear and likely relevant to resolving the earlier flagged ambiguity between those two fields.",
+    "Function names are treated as opaque references to backend logic (e.g. custom functions/deluge scripts); no internal implementation details were provided or assumed beyond the stated trigger and likely effect."
+  ]
+}

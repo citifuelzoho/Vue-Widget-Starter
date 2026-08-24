@@ -1,0 +1,30 @@
+void automation.moCreateServices(Int moId)
+{
+moRecord = zoho.crm.getRecordById("Maintenance_Sales",moId);
+coqlQuery = "Select id,Service_Name from Service_Engagement where Maintenance_Offers=" + moId;
+coqlResp = standalone.uLib("coql",{"query":coqlQuery});
+oldList = List();
+for each  oldSE in coqlResp.get("data")
+{
+	oldList.add(oldSE.get("Service_Name"));
+}
+globalPicklistId = "6532936000195645207";
+// Service List
+response = invokeurl
+[
+	url :"https://www.zohoapis.com/crm/v8/settings/global_picklists/" + globalPicklistId
+	type :GET
+	connection:"crmfile"
+];
+values = response.get("global_picklists").get(0).get("pick_list_values");
+createList = List();
+for each  val in values
+{
+	if(val.get("type") == "used" && val.get("display_value") != "-None-" && !oldList.contains(val.get("display_value")))
+	{
+		serviceName = val.get("display_value");
+		createList.add({"Name":moRecord.get("Name") + " - " + serviceName,"Service_Name":serviceName,"Expected_Cycle":standalone.msGetServiceCycle(serviceName),"Maintenance_Offers":moId});
+	}
+}
+zoho.crm.bulkCreate("Service_Engagement",createList,{"trigger":{"workflow","approval","blueprint"}});
+}

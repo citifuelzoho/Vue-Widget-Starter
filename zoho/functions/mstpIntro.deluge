@@ -1,0 +1,39 @@
+string standalone.mstpIntro(Int tpId,Int ownerId)
+{
+tpRecord = zoho.crm.getRecordById("Maintenance_Touchpoints",tpId);
+msRecord = zoho.crm.getRecordById("Maintenance_Sales",tpRecord.get("Maintenance_Offers").get("id"));
+seRecords = zoho.crm.getRelatedRecords("Service_Engagements","Maintenance_Sales",tpRecord.get("Maintenance_Offers").get("id"));
+seMapping = Map();
+for each  se in seRecords
+{
+	seMapping.put(se.get("Service_Name"),se);
+}
+createList = List();
+for each  serviceName in tpRecord.get("Services_Discussed")
+{
+	serviceName = zoho.encryption.urlDecode(serviceName);
+	if(isNull(seMapping.get(serviceName)))
+	{
+		createList.add({"Name":msRecord.get("Name") + " - " + serviceName,"Service_Name":serviceName,"Last_Discussed_Date":zoho.currentdate,"Status":"Introduced","Expected_Cycle":standalone.msGetServiceCycle(serviceName),"Maintenance_Offers":msRecord.get("id")});
+	}
+	else
+	{
+		se = seMapping.get(serviceName);
+		if(isNull(se.get("Status")))
+		{
+			zoho.crm.updateRecord("Service_Engagement",se.get("id"),{"Last_Discussed_Date":zoho.currentdate,"Status":"Introduced"},{"trigger":{"workflow","orchestration"}});
+		}
+	}
+}
+if(createList.size() > 0)
+{
+	createResponse = zoho.crm.bulkCreate("Service_Engagement",createList,{"trigger":{"workflow","orchestration"}});
+}
+updMap = {"Next_Action_Date":tpRecord.get("Next_Action_Date")};
+if(msRecord.get("Lifecycle_Status") == "Onboarded")
+{
+	updMap.put("Lifecycle_Status","Educated");
+}
+updResponse = zoho.crm.updateRecord("Maintenance_Sales",msRecord.get("id"),updMap,{"trigger":{"workflow","orchestration"}});
+return "";
+}
