@@ -36,10 +36,34 @@ export const ConversationTypes = [
 // spec allows a human to manually restart it from Churned. Decided 2026-08-21,
 // pending a future review with the user's manager — revisit if that changes.
 export const AllowedConversationTypesByLifecycleStatus = {
-  Onboarded: ['Intro', 'Post-service feedback', 'Active Client Feedback'],
-  Educated: ['Intro', 'Post-service feedback', 'Active Client Feedback'],
-  Activated: ['Intro', 'Post-service feedback', 'Active Client Feedback'],
-  Active: ['Intro', 'Post-service feedback', 'Active Client Feedback'],
+  Onboarded: [
+    'Intro',
+    'Post-service feedback',
+    'Active Client Feedback',
+    'Re-engagement',
+    'Churned Feedback'
+  ],
+  Educated: [
+    'Intro',
+    'Post-service feedback',
+    'Active Client Feedback',
+    'Re-engagement',
+    'Churned Feedback'
+  ],
+  Activated: [
+    'Intro',
+    'Post-service feedback',
+    'Active Client Feedback',
+    'Re-engagement',
+    'Churned Feedback'
+  ],
+  Active: [
+    'Intro',
+    'Post-service feedback',
+    'Active Client Feedback',
+    'Re-engagement',
+    'Churned Feedback'
+  ],
   Dormant: ['Re-engagement', 'Churned Feedback'],
   'Re-engagement': ['Re-engagement', 'Churned Feedback'],
   Churned: ['Re-engagement']
@@ -151,6 +175,71 @@ export const RefusalReasonOptions = [
 export const RefusalConfidenceOptions = [
   { label: 'Hard', value: 'Hard' },
   { label: 'Soft', value: 'Soft' }
+]
+
+// Maintenance Offer (Maintenance_Sales) fields shown/edited in IntroForm's
+// two-column account-details section — added 2026-08-21. Field API names
+// below (Account_Type, Fleet_Size, Estimated_Monthly_Mileage,
+// Informed_about_TruckMe_By_Fuel_Sales, Preferred_Language, Other_Language,
+// Preferred_Communication, Main_Decision_Maker, TG_Group_Link) are INFERRED
+// from the labels given, not confirmed against a layout export — flag any
+// that don't match your actual Zoho field names.
+export const AccountTypeOptions = [
+  { label: 'Owner Operator', value: 'Owner Operator' },
+  { label: 'Fleet Company', value: 'Fleet Company' }
+]
+
+// Distinct from the plain Fleet_Size number field — this bracketed field is
+// about monthly mileage, not fleet size (renamed 2026-08-25; was originally
+// guessed as a second "Fleet Size" field given both were called that at
+// first, but the bracket values are actually mileage ranges).
+export const EstimatedMonthlyMileageOptions = [
+  { label: '<5k', value: '<5k' },
+  { label: '5k - 10k', value: '5k - 10k' },
+  { label: '10k - 20k', value: '10k - 20k' },
+  { label: '20k+', value: '20k+' }
+]
+
+export const IntroductionSourceOptions = [
+  { label: 'Fuel Sales', value: 'Fuel Sales' },
+  { label: 'Truck.me Outbound', value: 'Truck.me Outbound' },
+  { label: 'Referral', value: 'Referral' },
+  { label: 'Existing Client', value: 'Existing Client' },
+  { label: 'Website', value: 'Website' },
+  { label: 'Social Media', value: 'Social Media' },
+  { label: 'Other', value: 'Other' }
+]
+
+export const InformedByFuelSalesOptions = [
+  { label: 'Yes', value: 'Yes' },
+  { label: 'No', value: 'No' },
+  { label: 'Unknown', value: 'Unknown' }
+]
+
+export const PreferredLanguageOptions = [
+  { label: 'English', value: 'English' },
+  { label: 'Russian', value: 'Russian' },
+  { label: 'Uzbek', value: 'Uzbek' },
+  { label: 'Ukrainian', value: 'Ukrainian' },
+  { label: 'Tadjik', value: 'Tadjik' },
+  { label: 'Other', value: 'Other' }
+]
+
+export const PreferredCommunicationOptions = [
+  { label: 'Phone', value: 'Phone' },
+  { label: 'Mobile App', value: 'Mobile App' },
+  { label: 'SMS', value: 'SMS' },
+  { label: 'Email', value: 'Email' },
+  { label: 'Telegram', value: 'Telegram' }
+]
+
+export const MainDecisionMakerOptions = [
+  { label: 'Owner', value: 'Owner' },
+  { label: 'Dispatcher', value: 'Dispatcher' },
+  { label: 'Fleet Manager', value: 'Fleet Manager' },
+  { label: 'Driver', value: 'Driver' },
+  { label: 'Operations Manager', value: 'Operations Manager' },
+  { label: 'Other', value: 'Other' }
 ]
 
 // ---------------------------------------------------------------------------

@@ -19,15 +19,16 @@
     "src/store.js": "appState ref — the ONLY cross-form shared state: conversationType, callOutcome, entityId, page. Everything else is a local ref in the owning form. Do not add form-specific fields here.",
     "src/store/handoff.js": "One-shot module-level ref bridge: setHandoffData(data)/consumeHandoffData() (read-and-clear). Used solely for ReEngagementForm -> ChurnedFeedbackForm.",
     "src/store/user.js": "useUserStore() composable: user ref + fetchUser() -> ZOHO.CRM.CONFIG.getCurrentUser(), sets user.value = responseData.users[0]. Called by every form except ActiveClientFeedbackForm.",
-    "src/store/maintenanceOffer.js": "useMaintenanceOfferStore() composable (added 2026-08-21): maintenanceOffer ref + fetchMaintenanceOffer() -> ZOHO.CRM.API.getRecord({Entity:'Maintenance_Sales', RecordID: appState.entityId}), sets maintenanceOffer.value = response.data[0]. Called only by HomeForm, to read Lifecycle_Status for availableConversationTypes filtering. Entity name is hardcoded, not read from the PageLoad event, since this widget is always opened from a Maintenance_Sales record.",
+    "src/store/maintenanceOffer.js": "useMaintenanceOfferStore() composable (added 2026-08-21): maintenanceOffer ref + fetchMaintenanceOffer() -> ZOHO.CRM.API.getRecord({Entity:'Maintenance_Sales', RecordID: appState.entityId}), sets maintenanceOffer.value = response.data[0]. Called by HomeForm (reads Lifecycle_Status for availableConversationTypes filtering) and IntroForm (reads/populates its Company Information section) — each call site gets its own independent fetch, no shared state across forms. Entity name is hardcoded, not read from the PageLoad event, since this widget is always opened from a Maintenance_Sales record.",
     "src/config/select-options.js": "All dropdown/multiselect option arrays, grouped into commented sections by consumer (Home / Shared-across-forms / Intro / Post-Service Feedback / Active Client Feedback / Shared reason-branch fields / Re-engagement / Churned). Source of truth for exact option values — this JSON does not duplicate them except where a value is a mapping key elsewhere in this file.",
     "src/utils/touchpoint.js": "createTouchpoint(apiData) -> ZOHO.CRM.API.insertRecord({Entity:'Maintenance_Touchpoints', APIData: JSON.parse(JSON.stringify(apiData)), Trigger:['workflow']}). Used by every form. The JSON round-trip was added 2026-08-21 — see known_bugs_fixed_this_project.reactive-proxy-clone-failure.",
     "src/utils/maintenanceRequests.js": "updateMaintenanceRequests(recordIds, fields) -> recordIds.map(id => ZOHO.CRM.API.updateRecord({Entity:'Maintenance_Request' (singular, intentional — real Zoho API name), APIData:{id,...JSON.parse(JSON.stringify(fields))}, Trigger:['workflow']})) — returns an ARRAY of promises, one per record (not a single bulk call). Used only by PostServiceFeedbackForm. Same JSON round-trip added 2026-08-21 as defensive insurance, though no current field passed here is reactive.",
+    "src/utils/maintenanceOffer.js": "updateMaintenanceOffer(recordId, fields) -> ZOHO.CRM.API.updateRecord({Entity:'Maintenance_Sales', APIData: JSON.parse(JSON.stringify({id: recordId, ...fields})), Trigger:['workflow']}). Added 2026-08-21. Used only by IntroForm, for its Company Information section — the JSON round-trip protects against the same reactive-Proxy hazard as touchpoint.js/maintenanceRequests.js (Preferred_Language/Preferred_Communication are multiselect refs).",
     "src/components/Base*.vue": "BaseSelect, BaseMultiSelect, BaseInput, BaseTextarea, BaseButton — generic form controls.",
     "src/components/TablePagination.vue": "Used only by PostServiceFeedbackForm's request table.",
     "src/components/Clock.vue": "Unused scaffold leftover. Not imported anywhere. Safe to delete.",
     "src/components/forms/HomeForm.vue": "Entry screen. Filters the Conversation option dropdown by the current Maintenance_Sales.Lifecycle_Status — see forms.HomeForm below.",
-    "src/components/forms/IntroForm.vue": "Flat form, no shared component.",
+    "src/components/forms/IntroForm.vue": "Flat form, no shared component. Also has a two-column 'Company Information' section (added 2026-08-21) writing to Maintenance_Sales, not the touchpoint — see forms.IntroForm.maintenance_offer_fields below.",
     "src/components/forms/PostServiceFeedbackForm.vue": "Writes to two modules; has known bugs (see known_bugs).",
     "src/components/forms/ActiveClientFeedbackForm.vue": "Mounts ReasonBranchFields for its concern tree.",
     "src/components/forms/ReEngagementForm.vue": "Mounts ReasonBranchFields; can hand off to Churned instead of submitting.",
@@ -109,7 +110,85 @@
     "IntroForm": {
       "file": "src/components/forms/IntroForm.vue",
       "entity_written": "Maintenance_Touchpoints",
+      "also_writes": "Maintenance_Sales (Maintenance Offer) — added 2026-08-21, see maintenance_offer_fields below. This is the only form that writes to a module other than Maintenance_Touchpoints/Maintenance_Request.",
       "uses_user_store": true,
+      "uses_maintenance_offer_store": "added 2026-08-21 — own independent fetchMaintenanceOffer() call (components don't share state across navigation with HomeForm's own fetch). Populated via .then() on the fetch, not a watch — one-time populate-on-mount, not an ongoing sync.",
+      "maintenance_offer_fields": {
+        "note": "Ten fields shown in a two-column 'Company Information' section at the top of the form, read from AND written back to Maintenance_Sales — NOT touchpoint fields. Populated on mount from the current record; updated via updateMaintenanceOffer() BEFORE createTouchpoint() runs (see submit_logic). None are required. All ten API field names below are INFERRED from labels given by the user, not confirmed against a layout export — verify against Zoho Setup before relying on them, same unconfirmed-name risk already resolved once for Maintenance_Touchpoints/Maintenance_Request, now open again here.",
+        "fields": [
+          {
+            "id": "account-type",
+            "type": "select",
+            "model": "accountType",
+            "options": "AccountTypeOptions (Owner Operator, Fleet Company)",
+            "apiField": "Account_Type"
+          },
+          {
+            "id": "fleet-size",
+            "type": "number input",
+            "model": "fleetSize",
+            "apiField": "Fleet_Size"
+          },
+          {
+            "id": "estimated-monthly-mileage",
+            "type": "select",
+            "model": "estimatedMonthlyMileage",
+            "options": "EstimatedMonthlyMileageOptions (<5k, 5k - 10k, 10k - 20k, 20k+)",
+            "apiField": "Estimated_Monthly_Mileage",
+            "note": "renamed 2026-08-25 from a second 'Fleet Size' field (fleet-size-range/Fleet_Size_Range) — the bracket values are actually monthly mileage, not fleet size; both were called 'Fleet Size' at first since the user hadn't yet clarified they're distinct concepts"
+          },
+          {
+            "id": "introduction-source",
+            "type": "select",
+            "model": "introductionSource",
+            "options": "IntroductionSourceOptions (Fuel Sales, Truck.me Outbound, Referral, Existing Client, Website, Social Media, Other)",
+            "apiField": "Introduction_Source"
+          },
+          {
+            "id": "informed-by-fuel-sales",
+            "type": "select",
+            "model": "informedByFuelSales",
+            "options": "InformedByFuelSalesOptions (Yes, No, Unknown)",
+            "apiField": "Informed_about_TruckMe_By_Fuel_Sales"
+          },
+          {
+            "id": "preferred-language",
+            "type": "multiselect",
+            "model": "preferredLanguage",
+            "options": "PreferredLanguageOptions (English, Russian, Uzbek, Ukrainian, Tadjik, Other)",
+            "apiField": "Preferred_Language"
+          },
+          {
+            "id": "other-language",
+            "type": "input",
+            "model": "otherLanguage",
+            "conditional": "preferredLanguage.includes('Other')",
+            "apiField": "Other_Language",
+            "blank_when_hidden": true
+          },
+          {
+            "id": "preferred-communication",
+            "type": "multiselect",
+            "model": "preferredCommunication",
+            "options": "PreferredCommunicationOptions (Phone, Mobile App, SMS, Email, Telegram)",
+            "apiField": "Preferred_Communication"
+          },
+          {
+            "id": "main-decision-maker",
+            "type": "multiselect",
+            "model": "mainDecisionMaker",
+            "options": "MainDecisionMakerOptions (Owner, Dispatcher, Fleet Manager, Driver, Operations Manager, Other)",
+            "apiField": "Main_Decision_Maker",
+            "note": "changed from select to multiselect 2026-08-25"
+          },
+          {
+            "id": "tg-group-link",
+            "type": "input (type=url)",
+            "model": "tgGroupLink",
+            "apiField": "TG_Group_Link"
+          }
+        ]
+      },
       "fields": [
         {
           "id": "client-reaction",
@@ -162,7 +241,7 @@
           "apiField": "Next_Action_Date"
         }
       ],
-      "submit_logic": "Single createTouchpoint call with all fields above + Maintenance_Offers/Conversation_Type/Call_Outcome/Owner -> alert -> closeReload. No shared component, no branch tree. Payload guards mirror the v-if condition directly inline (no separate computed) — no drift possible."
+      "submit_logic": "isLoading=true -> try{ maintenanceOfferFields assembled from the 10 Company Information refs (Other_Language blanked unless preferredLanguage includes 'Other') -> await updateMaintenanceOffer(appState.entityId, maintenanceOfferFields) [writes Maintenance_Sales, BEFORE the touchpoint] -> apiData assembled (touchpoint fields) -> await createTouchpoint(apiData) }finally{ isLoading=false } -> alert -> closeReload. Changed 2026-08-21: isLoading reset moved from a .finally() on just the createTouchpoint call to a try/finally wrapping BOTH awaited calls — otherwise a failure in updateMaintenanceOffer specifically would leave isLoading stuck true forever (Submit button stuck disabled), the same bug class already known for PostServiceFeedbackForm. No shared component, no branch tree for the touchpoint fields themselves. Payload guards mirror the v-if condition directly inline (no separate computed) — no drift possible."
     },
     "PostServiceFeedbackForm": {
       "file": "src/components/forms/PostServiceFeedbackForm.vue",
@@ -840,7 +919,10 @@
         {
           "outcome": "Not Now",
           "shown_fields": ["Why Not Now? (dropdown)"],
-          "shown_fields_per_spec": ["Why Not Now? (dropdown)", "Next Review Date (date, mandatory)"],
+          "shown_fields_per_spec": [
+            "Why Not Now? (dropdown)",
+            "Next Review Date (date, mandatory)"
+          ],
           "stage_transition_spec": "After saving: Re-engagement -> Dormant.",
           "implementation_status": "Why Not Now implemented (WhyNotNowOptions). Next Review Date deliberately NOT implemented — see spec_vs_implementation_divergences.next-review-date-dropped-for-consistency. Stage_transition NOT implemented either way — no Zoho write moves the client back to Dormant; left to Zoho-side workflow per the project's explicit 'widget does data capture only' decision (see known_gaps_deliberately_out_of_scope.no-funnel-stage-automation) — in practice this is now the 30-day Dormant schedule in docs/ZOHO_AUTOMATION_PLAN.md, not a direct write from this outcome."
         },
@@ -971,7 +1053,9 @@
   "spec_vs_implementation_divergences": [
     {
       "id": "next-review-date-dropped-for-consistency",
-      "affected_fields": ["Next_Review_Date (Re-engagement, 'Not Now' outcome)"],
+      "affected_fields": [
+        "Next_Review_Date (Re-engagement, 'Not Now' outcome)"
+      ],
       "spec_said": "Not Now outcome requires both 'Why Not Now?' and a mandatory 'Next Review Date' — a distinct field from Next_Action_Date, specific to this one outcome.",
       "implementation_does": "Next_Review_Date was actually implemented on 2026-08-21 (field, layout rule, and a Deluge task-automation branch using it as the due date), then removed again the same day. Not Now now uses the same Next_Action_Date every other outcome/form uses — no second date field.",
       "reason": "Explicit product decision: use Next_Action_Date consistently across every outcome and every form rather than add an outcome-specific date field, even though the spec calls for a distinct one here.",
@@ -1153,8 +1237,14 @@
     },
     {
       "id": "unconfirmed-field-names",
-      "status": "RESOLVED for both modules. Maintenance_Touchpoints confirmed 2026-08-20 via a real layout export — see zoho_layout_verification (39/41 picklist fields matched exactly, the 2 value-set discrepancies found have since been fixed in Zoho Setup, see known_bugs_fixed_this_project). Maintenance_Request confirmed 2026-08-21 — not via a layout export this time, but by the user directly: PostServiceFeedbackForm's feedback data (Service_Satisfaction, Will_Use_Again, Shop_Rating, Maintenance_Agent_Rating, Touchpoint) is saving correctly in production.",
-      "description": "Every Zoho field API name across the whole app was inferred from the spec's on-screen label originally. Both modules this widget writes to are now confirmed correct — no remaining unverified field names anywhere in the app."
+      "status": "RESOLVED for Maintenance_Touchpoints and Maintenance_Request (the two modules the widget wrote to before 2026-08-21). Maintenance_Touchpoints confirmed 2026-08-20 via a real layout export — see zoho_layout_verification (39/41 picklist fields matched exactly, the 2 value-set discrepancies found have since been fixed in Zoho Setup, see known_bugs_fixed_this_project). Maintenance_Request confirmed 2026-08-21 by the user directly: PostServiceFeedbackForm's feedback data is saving correctly in production. REOPENED 2026-08-21 for a third module — see unconfirmed-field-names-maintenance-sales below, which now carries this same caveat for IntroForm's new Company Information fields.",
+      "description": "Every Zoho field API name across the whole app was inferred from the spec's on-screen label originally. Maintenance_Touchpoints and Maintenance_Request are both now confirmed correct; Maintenance_Sales is not, as of the 2026-08-21 IntroForm change."
+    },
+    {
+      "id": "unconfirmed-field-names-maintenance-sales",
+      "file": "src/components/forms/IntroForm.vue, src/config/select-options.js, src/utils/maintenanceOffer.js",
+      "status": "open",
+      "description": "The ten Company Information field API names IntroForm reads from and writes to on Maintenance_Sales (Account_Type, Fleet_Size, Estimated_Monthly_Mileage, Introduction_Source, Informed_about_TruckMe_By_Fuel_Sales, Preferred_Language, Other_Language, Preferred_Communication, Main_Decision_Maker, TG_Group_Link) were inferred from labels given verbally, not confirmed against a layout export or the user directly, unlike the other two modules (see unconfirmed-field-names above). The user confirmed these fields already exist in Zoho, but not that these exact API names are correct. Verify before relying on this in production, same as the pattern that resolved the other two modules."
     }
   ],
   "known_bugs_fixed_this_project": [

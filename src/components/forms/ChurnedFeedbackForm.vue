@@ -44,9 +44,9 @@
       v-if="showWhatCouldBringBack && previousWhatCanBringBack.length"
       class="zp-handoff-note"
     >
-      During the Re-engagement call, "What Can Bring Client Back?" was
-      answered: {{ previousWhatCanBringBack.join(', ') }}. Consider whether
-      the same things still apply here.
+      During the Re-engagement call, "What Can Bring Client Back?" was answered:
+      {{ previousWhatCanBringBack.join(', ') }}. Consider whether the same
+      things still apply here.
     </p>
 
     <BaseMultiSelect

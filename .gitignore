@@ -10,3 +10,7 @@ local/
 *.crt
 *.pem
 *.key
+
+# docs/ are generated except the machine-readable project state
+docs/*
+!docs/PROJECT_STATE.json
