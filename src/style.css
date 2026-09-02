@@ -1,12 +1,13 @@
 :root {
   font-family: Arial, Helvetica, sans-serif;
-  color: #1f2937;
-  background: #f8fafc;
 
   /* Shared design tokens — every component style block below reads these
      instead of repeating raw hex, so the palette/radius only ever need to
      change in one place. Values themselves were already consistent across
-     components before this existed; this just stops that being by hand. */
+     components before this existed; this just stops that being by hand.
+     Light values live here on bare :root; dark overrides are further down
+     under prefers-color-scheme, so this stays the single light palette. */
+  --color-page-bg: #f8fafc;
   --color-text: #1f2937;
   --color-text-muted: #6b7280;
   --color-text-disabled: #9ca3af;
@@ -21,9 +22,16 @@
   --color-accent-soft: #eef2ff;
   --color-accent-ring: rgba(99, 102, 241, 0.15);
   --color-danger: #dc2626;
+  --color-danger-soft: #fef2f2;
+  --color-success: #16a34a;
+  --color-success-soft: #f0fdf4;
+  --color-warning: #d97706;
+  --color-warning-soft: #fffbeb;
+  --shadow-elevated: 0 8px 24px rgba(15, 23, 42, 0.08);
+  --shadow-panel: 0 12px 24px rgba(15, 23, 42, 0.12);
   --radius-md: 8px;
   --radius-sm: 6px;
-  --font-size-control: 0.95rem;
+  --font-size-control: 0.85rem;
   /* Floor height for every field control (dropdown, labeled-input, the
      file-upload button). Without it each one is only as tall as whatever
      it happens to contain, and a native <input type="date">'s built-in
@@ -37,18 +45,55 @@
      "disabled" reads the same everywhere regardless of the control's own
      fill (solid button vs. outlined input). */
   --disabled-opacity: 0.6;
+
+  color: var(--color-text);
+  background: var(--color-page-bg);
+}
+
+/* Dark palette, applied automatically from the OS/browser-level dark-mode
+   preference — no manual toggle. Every value below is a straight
+   redefinition of a token already used everywhere via var(...), so no
+   component style needs its own dark-mode rule. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-page-bg: #0f172a;
+    --color-text: #f1f5f9;
+    --color-text-muted: #94a3b8;
+    --color-text-disabled: #64748b;
+    --color-border: #334155;
+    --color-border-hover: #475569;
+    --color-border-subtle: #1e293b;
+    --color-surface: #1e293b;
+    --color-surface-hover: #273548;
+    --color-surface-disabled: #0f172a;
+    --color-accent: #818cf8;
+    --color-accent-hover: #a5b4fc;
+    --color-accent-soft: rgba(129, 140, 248, 0.18);
+    --color-accent-ring: rgba(129, 140, 248, 0.35);
+    --color-danger: #f87171;
+    --color-danger-soft: rgba(248, 113, 113, 0.15);
+    --color-success: #4ade80;
+    --color-success-soft: rgba(74, 222, 128, 0.15);
+    --color-warning: #fbbf24;
+    --color-warning-soft: rgba(251, 191, 36, 0.15);
+    --shadow-elevated: 0 8px 24px rgba(0, 0, 0, 0.4);
+    --shadow-panel: 0 12px 24px rgba(0, 0, 0, 0.45);
+  }
 }
 
 body {
-  min-height: 100vh;
+  min-height: 100%;
   padding: 1rem;
+  margin: 0;
 }
 
 .widget-shell {
   padding: 2rem;
   border-radius: 12px;
-  background: white;
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-subtle);
+  box-shadow: var(--shadow-elevated);
+  height: 100%;
 }
 
 h1 {

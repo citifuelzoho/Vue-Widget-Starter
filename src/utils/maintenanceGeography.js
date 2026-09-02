@@ -12,13 +12,13 @@ import { runCoqlQuery } from './coql'
  * @param {number} [limit=25] - Max records to return (COQL max is 200).
  * @returns {Promise<Array<{id: string, Name: string}>>}
  */
-export async function searchMaintenanceGeography(searchText, limit = 25) {
+export async function searchMaintenanceGeography(searchText, limit = 2000) {
   const escaped = (searchText || '').trim().replace(/'/g, "''")
 
   const conditions = ['Name is not null'] //['INPUT_RABATE_AMOUNT is not null']
   if (escaped) conditions.push(`Name like '%${escaped}%'`)
 
-  const selectQuery = `select id, Name from Maintenance_Geography where ${conditions.join(' and ')} order by Name limit ${limit}`
+  const selectQuery = `select id, Name, INPUT_RABATE_AMOUNT from Maintenance_Geography where ${conditions.join(' and ')} order by Name limit ${limit}`
 
   return runCoqlQuery(selectQuery)
 }

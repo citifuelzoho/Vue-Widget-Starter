@@ -403,7 +403,7 @@
     background: var(--color-surface);
     border: 1px solid var(--color-border-subtle);
     border-radius: var(--radius-md);
-    box-shadow: 0 12px 24px rgba(15, 23, 42, 0.12);
+    box-shadow: var(--shadow-panel);
     overflow: hidden;
   }
 

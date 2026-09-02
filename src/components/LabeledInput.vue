@@ -25,6 +25,7 @@
         :required="required"
         :maxlength="maxlength ?? undefined"
         :minlength="minlength ?? undefined"
+        :pattern="amountPattern"
         @input="onInput"
         @blur="emit('blur', $event)"
       />
@@ -90,6 +91,17 @@
   // free of the native number spinner and locale-dependent formatting quirks
   // while still filtering to a plain, unsigned decimal string.
   const nativeType = computed(() => (props.type === 'date' ? 'date' : 'text'))
+
+  // sanitizeAmount deliberately allows in-progress states like "5." while
+  // typing (stripping it mid-keystroke would make it impossible to ever
+  // type a decimal point), so a bare "." or a trailing-dot value with no
+  // digits after it can still reach modelValue — and since that's non-empty
+  // text, native `required` alone doesn't catch it. `pattern` does, at
+  // submit/reportValidity time, the same native-constraint-validation
+  // approach already used for maxlength/minlength/required on this input.
+  const amountPattern = computed(() =>
+    props.type === 'amount' ? String.raw`\d*\.?\d+` : undefined
+  )
 
   // Strips anything but digits and a single decimal point, capped at 2
   // fractional digits, so typing/pasting e.g. "12a.3.456" settles on
