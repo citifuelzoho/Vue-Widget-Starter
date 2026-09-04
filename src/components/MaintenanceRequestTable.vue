@@ -21,8 +21,9 @@
         <thead>
           <tr>
             <th class="request-table__checkbox-cell">
-              <input type="checkbox" :checked="allSelected" :disabled="selectableRecords.length === 0"
-                aria-label="Select all requests" @change="toggleAll" />
+              <input type="checkbox" :checked="allSelected"
+                :disabled="selectableRecords.length === 0 || !!selfPaidSelectedId" aria-label="Select all requests"
+                @change="toggleAll" />
             </th>
             <th>Name</th>
             <th>PO</th>
@@ -33,13 +34,12 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="record in records" :key="record.id" class="request-table__row"
-            :class="{
-              'request-table__row--selected': isSelected(record.id),
-              'request-table__row--locked': isLocked(record)
-            }" @click="toggle(record.id)">
+          <tr v-for="record in records" :key="record.id" class="request-table__row" :class="{
+            'request-table__row--selected': isSelected(record.id),
+            'request-table__row--locked': isRowDisabled(record)
+          }" @click="toggle(record.id)">
             <td class="request-table__checkbox-cell">
-              <input type="checkbox" :checked="isSelected(record.id)" :disabled="isLocked(record)"
+              <input type="checkbox" :checked="isSelected(record.id)" :disabled="isRowDisabled(record)"
                 :aria-label="`Select ${record.Name}`" @click.stop @change="toggle(record.id)" />
             </td>
             <td>{{ record.Name }}</td>
@@ -119,7 +119,7 @@ async function fetchRequests(geographyId) {
   errorMessage.value = ''
 
   try {
-    const selectQuery = `select id, Name, Single_Line_9, Shop_Name, Created_Time, Discounted_Amount,Zelle_Transaction from Maintenance_Request where ((Status='In CMP' OR Status='Data Entry Face') AND Shop_Name.Maintenance_Geography = ${geographyId}) ORDER BY Created_Time desc limit 20`
+    const selectQuery = `select id, Name, Single_Line_9, Shop_Name, Created_Time, Discounted_Amount,Zelle_Transaction, Status from Maintenance_Request where (((Status='In CMP' OR Status='Data Entry Face') OR Status='Self Paid') AND Shop_Name.Maintenance_Geography = ${geographyId}) ORDER BY Created_Time desc limit 20`
     records.value = await runCoqlQuery(selectQuery)
   } catch (error) {
     console.error('Failed to fetch Maintenance_Request records', error)
@@ -144,22 +144,68 @@ function isLocked(record) {
   return record.Zelle_Transaction !== null && record.Zelle_Transaction !== undefined
 }
 
+// A Self Paid request has no Discounted_Amount to share a payment
+// proportionally against — the shop already covered it. So selecting one
+// is exclusive: the whole Amount goes to that one request, and nothing
+// else can be selected alongside it (see toggle/isRowDisabled below).
+function isSelfPaid(record) {
+  return record.Status === 'Self Paid'
+}
+
+// "Select all" only ever considers ordinary requests — Self Paid rows are
+// always selected individually and exclusively instead, never as part of a
+// bulk select.
 const selectableRecords = computed(() =>
-  records.value.filter(record => !isLocked(record))
+  records.value.filter(record => !isLocked(record) && !isSelfPaid(record))
+)
+
+// The Self Paid request currently holding the selection exclusively, if
+// any — null once it's unchecked again.
+const selfPaidSelectedId = computed(
+  () =>
+    props.modelValue.find(id => {
+      const record = records.value.find(existing => existing.id === id)
+      return record && isSelfPaid(record)
+    }) ?? null
 )
 
 function isSelected(id) {
   return props.modelValue.includes(id)
 }
 
+// Drives the checkbox's :disabled and the row's dimmed styling: locked
+// (already has a Zelle_Transaction) rows are always disabled; every row
+// other than the one Self Paid selection itself is disabled while that
+// exclusive lock is active.
+function isRowDisabled(record) {
+  if (isLocked(record)) return true
+  return Boolean(selfPaidSelectedId.value) && record.id !== selfPaidSelectedId.value
+}
+
 function toggle(id) {
   const record = records.value.find(existing => existing.id === id)
-  if (record && isLocked(record)) return
+  if (!record || isLocked(record)) return
 
-  const next = isSelected(id)
-    ? props.modelValue.filter(existing => existing !== id)
-    : [...props.modelValue, id]
-  emit('update:modelValue', next)
+  if (isSelected(id)) {
+    emit(
+      'update:modelValue',
+      props.modelValue.filter(existing => existing !== id)
+    )
+    return
+  }
+
+  // Can't add a new selection while a different Self Paid request already
+  // holds the selection exclusively.
+  if (selfPaidSelectedId.value) return
+
+  if (isSelfPaid(record)) {
+    // Selecting a Self Paid request replaces whatever else was selected,
+    // rather than adding to it — see isSelfPaid's comment.
+    emit('update:modelValue', [id])
+    return
+  }
+
+  emit('update:modelValue', [...props.modelValue, id])
 }
 
 const allSelected = computed(
@@ -169,6 +215,8 @@ const allSelected = computed(
 )
 
 function toggleAll() {
+  if (selfPaidSelectedId.value) return
+
   emit(
     'update:modelValue',
     allSelected.value ? [] : selectableRecords.value.map(record => record.id)
@@ -198,9 +246,11 @@ const zelleAmountNumber = computed(() => Number(props.zelleAmount) || 0)
 
 // Rebate Amount: rebatePercent% of this one record's own Discounted_Amount
 // — independent of everything else in the table. null (not 0) when the
-// geography has no rebate percent set — there's nothing to compute.
+// geography has no rebate percent set, or the record is Self Paid (which
+// has no Discounted_Amount to compute one from at all) — there's nothing
+// to compute in either case.
 function rebateAmountFor(record) {
-  if (!hasRebatePercent.value) return null
+  if (!hasRebatePercent.value || isSelfPaid(record)) return null
   const discountedAmount = Number(record.Discounted_Amount) || 0
   return (discountedAmount * rebatePercentNumber.value) / 100
 }
@@ -249,6 +299,11 @@ function splitEvenly(totalCents, ids) {
 // With no rebate percent set: there's no cap to be proportional to, so
 // Amount is split evenly across the selected rows instead (splitEvenly
 // above) and all of it is always distributed — remaining is always 0.
+//
+// A Self Paid selection is exclusive (enforced in toggle/isRowDisabled —
+// nothing else can be selected alongside it), so if it's the sole selected
+// record it simply gets the whole Amount: there's no Discounted_Amount to
+// be proportional to, and nothing else selected to split with.
 const allocation = computed(() => {
   const byId = {}
   const selectedRecords = records.value.filter(record => isSelected(record.id))
@@ -256,6 +311,11 @@ const allocation = computed(() => {
 
   if (selectedRecords.length === 0 || zelleAmountCents <= 0) {
     return { byId, remaining: zelleAmountCents / 100 }
+  }
+
+  if (selectedRecords.length === 1 && isSelfPaid(selectedRecords[0])) {
+    byId[selectedRecords[0].id] = zelleAmountCents / 100
+    return { byId, remaining: 0 }
   }
 
   if (!hasRebatePercent.value) {
@@ -308,16 +368,19 @@ function appliedRebateFor(record) {
   return allocation.value.byId[record.id] ?? 0
 }
 
-// null when there's no "covered/uncovered" concept to show at all: either
-// the row isn't selected (its 0.00 isn't "uncovered" — it's just not part
-// of this payment), or the geography has no rebate percent set (even-split
-// mode has no per-row cap to be full/partial against). Otherwise, for a
-// selected row under a rebate percent: 'full' once Applied Rebate has
-// reached that row's own Rebate Amount cap, 'partial' otherwise. Compared
-// in cents, same as the allocation math itself, to avoid a same-value
-// comparison being thrown off by float noise.
+// null when there's no "covered/uncovered" concept to show at all: the row
+// isn't selected (its 0.00 isn't "uncovered" — it's just not part of this
+// payment), the geography has no rebate percent set (even-split mode has
+// no per-row cap to be full/partial against), or the record is Self Paid
+// (gets the whole Amount outright — no cap to be full/partial against
+// either). Otherwise, for a selected row under a rebate percent: 'full'
+// once Applied Rebate has reached that row's own Rebate Amount cap,
+// 'partial' otherwise. Compared in cents, same as the allocation math
+// itself, to avoid a same-value comparison being thrown off by float noise.
 function appliedRebateStatus(record) {
-  if (!isSelected(record.id) || !hasRebatePercent.value) return null
+  if (!isSelected(record.id) || !hasRebatePercent.value || isSelfPaid(record)) {
+    return null
+  }
   const capCents = Math.round(rebateAmountFor(record) * 100)
   if (capCents <= 0) return 'full'
   const appliedCents = Math.round(appliedRebateFor(record) * 100)
